@@ -22,7 +22,7 @@ jobs:
             uv.lock
       - run: uv python install ${{ matrix.python-version }}
       - run: uv run --python ${{ matrix.python-version }} --frozen python scripts/check_version.py
-      - run: uv run --python ${{ matrix.python-version }} --frozen pytest -q
+      - run: uv run --python ${{ matrix.python-version }} --extra dev --frozen pytest -q
       - run: uv run --python ${{ matrix.python-version }} --frozen python -m compileall -q src tests
 
   package:

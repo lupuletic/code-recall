@@ -39,7 +39,7 @@ jobs:
             uv.lock
       - run: uv python install 3.13
       - run: uv run --python 3.13 --frozen python scripts/check_version.py --tag "${{ steps.release-tag.outputs.tag }}"
-      - run: uv run --python 3.13 --frozen pytest -q
+      - run: uv run --python 3.13 --extra dev --frozen pytest -q
       - run: uv run --python 3.13 --frozen python -m compileall -q src tests
       - run: uv build --no-sources
       - uses: actions/upload-artifact@v4
