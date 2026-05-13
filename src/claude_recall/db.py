@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     file_size INTEGER DEFAULT 0,
     created TEXT,
     modified TEXT,
+    last_activity TEXT,
     mtime REAL DEFAULT 0,
     is_subagent INTEGER DEFAULT 0,
     parent_session TEXT,
@@ -150,10 +151,18 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create tables if they don't exist, run migrations if needed."""
     conn.executescript(SCHEMA_SQL)
+    _ensure_column(conn, "sessions", "last_activity", "TEXT")
 
     version = _get_meta(conn, "schema_version")
     if version is None:
         _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """Add a column if an existing database predates it."""
+    cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _get_meta(conn: sqlite3.Connection, key: str) -> str | None:
@@ -172,13 +181,35 @@ def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
 def upsert_session(conn: sqlite3.Connection, session: Session) -> None:
     """Insert or update a session in the database."""
     conn.execute(
-        """INSERT OR REPLACE INTO sessions
+        """INSERT INTO sessions
            (session_id, project_path, project_dir, file_path,
             summary, first_prompt, first_reply, last_prompt, last_reply,
             messages_text, git_branch, message_count, file_size,
-            created, modified, mtime, is_subagent, parent_session,
+            created, modified, last_activity, mtime, is_subagent, parent_session,
             files_modified, commands_run, git_branch_detected)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET
+             project_path=excluded.project_path,
+             project_dir=excluded.project_dir,
+             file_path=excluded.file_path,
+             summary=excluded.summary,
+             first_prompt=excluded.first_prompt,
+             first_reply=excluded.first_reply,
+             last_prompt=excluded.last_prompt,
+             last_reply=excluded.last_reply,
+             messages_text=excluded.messages_text,
+             git_branch=excluded.git_branch,
+             message_count=excluded.message_count,
+             file_size=excluded.file_size,
+             created=excluded.created,
+             modified=excluded.modified,
+             last_activity=excluded.last_activity,
+             mtime=excluded.mtime,
+             is_subagent=excluded.is_subagent,
+             parent_session=excluded.parent_session,
+             files_modified=excluded.files_modified,
+             commands_run=excluded.commands_run,
+             git_branch_detected=excluded.git_branch_detected""",
         (
             session.session_id,
             session.project_path,
@@ -195,6 +226,7 @@ def upsert_session(conn: sqlite3.Connection, session: Session) -> None:
             session.file_size,
             session.created,
             session.modified,
+            session.last_activity,
             session.mtime,
             int(session.is_subagent),
             session.parent_session,

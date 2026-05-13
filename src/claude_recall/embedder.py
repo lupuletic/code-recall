@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import numpy as np
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 _embedder_instance = None
 _reranker_instance = None
@@ -18,11 +21,11 @@ class Embedder:
 
         self._model = TextEmbedding(model_name=self.MODEL)
 
-    def embed(self, texts: list[str]) -> list[np.ndarray]:
+    def embed(self, texts: list[str]) -> list["np.ndarray"]:
         """Embed a batch of texts. Returns list of numpy arrays."""
         return list(self._model.embed(texts))
 
-    def embed_single(self, text: str) -> np.ndarray:
+    def embed_single(self, text: str) -> "np.ndarray":
         """Embed a single text string."""
         return list(self._model.embed([text]))[0]
 
@@ -48,7 +51,7 @@ class Reranker:
 
         Returns list of (original_index, score) sorted by score descending.
         """
-        scores = list(self._model.rerank(query, documents, top_k=len(documents)))
+        scores = list(self._model.rerank(query, documents))
         # scores is a list of floats, one per document in original order
         indexed_scores = list(enumerate(scores))
         indexed_scores.sort(key=lambda x: x[1], reverse=True)

@@ -24,8 +24,10 @@ from claude_recall.searcher import (
     _cross_encoder_rerank,
     _file_search,
     _fts_search,
+    _graph_search,
     _prepare_fts_query,
     _reciprocal_rank_fusion,
+    recent_sessions,
     search,
 )
 
@@ -260,6 +262,29 @@ class TestSearch:
             results = search(query, db_path=search_db, semantic=False)
             assert isinstance(results, list)
 
+    def test_recent_sessions_returns_modified_desc(self, search_db):
+        results = recent_sessions(db_path=search_db, limit=10)
+        ids = [r.session.session_id for r in results]
+        assert ids[:2] == ["s2", "s1"]
+        assert "s3_sub" not in ids
+
+    def test_recent_sessions_project_filter(self, search_db):
+        results = recent_sessions(db_path=search_db, limit=10, project_filter="webapp")
+        assert len(results) == 1
+        assert results[0].session.session_id == "s2"
+
+    def test_recent_sessions_prefers_last_activity(self, search_db):
+        conn = get_connection(search_db)
+        conn.execute(
+            "UPDATE sessions SET last_activity = ? WHERE session_id = ?",
+            ("2025-03-01T12:00:00Z", "s1"),
+        )
+        conn.commit()
+        conn.close()
+
+        results = recent_sessions(db_path=search_db, limit=10)
+        assert results[0].session.session_id == "s1"
+
 
 # ===========================================================================
 # _fts_search
@@ -391,6 +416,20 @@ class TestReciprocalRankFusion:
         result_vec_heavy = _reciprocal_rank_fusion(fts, vec, alpha=0.1)
         # With alpha=0.1, vec_top should rank first
         assert result_vec_heavy[0].session.session_id == "vec_top"
+
+    def test_graph_results_are_fused(self):
+        """Graph candidates should participate in normal RRF ranking."""
+        fts = [self._make_result("fts_top")]
+        vec = []
+        graph = [self._make_result("graph_top")]
+
+        result = _reciprocal_rank_fusion(
+            fts, vec, graph, alpha=0.1, graph_weight=0.8
+        )
+
+        ids = [r.session.session_id for r in result]
+        assert set(ids) == {"fts_top", "graph_top"}
+        assert ids[0] == "graph_top"
 
 
 # ===========================================================================
@@ -841,6 +880,27 @@ class TestStructuredSearch:
         results = search("branch:fix/auth debug", db_path=graph_db, semantic=False)
         if results:
             assert results[0].session.session_id == "gs1"
+
+    def test_free_text_uses_graph_file_candidates(self, graph_db):
+        """Normal searches should find sessions by graph metadata."""
+        results = search("test_auth", db_path=graph_db, semantic=False)
+        assert len(results) >= 1
+        assert results[0].session.session_id == "gs1"
+        assert any("test_auth.py" in s for s in results[0].snippets)
+
+    def test_free_text_uses_graph_command_candidates(self, graph_db):
+        """Normal searches should find sessions by commands run."""
+        results = search("npm test", db_path=graph_db, semantic=False)
+        assert len(results) >= 1
+        assert results[0].session.session_id == "gs2"
+
+    def test_graph_search_direct(self, graph_db):
+        """_graph_search should expose project/file/command/branch candidates."""
+        conn = get_connection(graph_db)
+        results = _graph_search(conn, "feature routing", 10, None, None, None, 1)
+        conn.close()
+        assert len(results) >= 1
+        assert results[0].session.session_id == "gs2"
 
 
 # ===========================================================================

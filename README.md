@@ -7,7 +7,7 @@ Semantic search with cross-encoder reranking and a knowledge graph across all yo
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-282%20passing-34D058.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-288%20passing-34D058.svg)](#development)
 [![Search Accuracy](https://img.shields.io/badge/search%20accuracy-93%25-34D058.svg)](#search-quality)
 [![Sessions](https://img.shields.io/badge/sessions-2%2C003-8B5CF6.svg)](#search-quality)
 [![Knowledge Graph](https://img.shields.io/badge/knowledge%20graph-3%2C124%20edges-F59E0B.svg)](#knowledge-graph)
@@ -145,7 +145,7 @@ uv pip install -e ".[all]"
 ## Usage
 
 ```bash
-# Interactive TUI — type to search, arrows to navigate, Enter to resume
+# Interactive TUI — starts with recent sessions; type to search
 claude-recall
 
 # Direct search
@@ -194,7 +194,7 @@ Prefixes query the knowledge graph directly — no fuzzy matching, just exact lo
 | `Cmd+⌫` | Clear entire search |
 | `Esc` | Quit |
 
-The preview panel shows session details including **related sessions** — other sessions that share files with the selected one, powered by the knowledge graph. This lets you trace work across sessions without searching.
+With an empty search box, the TUI shows your most recent sessions across all indexed projects. The preview panel shows session details including **related sessions** — other sessions that share files with the selected one, powered by the knowledge graph. This lets you trace work across sessions without searching.
 
 When you resume a session, claude-recall `cd`s to the original project directory and runs `claude --resume` — you land right back where you left off.
 
@@ -322,7 +322,10 @@ git clone https://github.com/lupuletic/claude-recall
 cd claude-recall
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all,dev]"
-python -m pytest tests/ -q     # 282+ tests, ~1s
+python -m pytest tests/ -q     # unit/integration tests
+
+# Optional: benchmark against your own populated Claude Code index
+CLAUDE_RECALL_RUN_QUALITY_TESTS=1 python -m pytest tests/test_search_quality.py -v
 ```
 
 ## License

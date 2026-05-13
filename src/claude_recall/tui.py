@@ -24,6 +24,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
+from claude_recall import __version__
 from claude_recall.models import SearchResult
 from claude_recall.utils import clean_display_text, format_date, format_size
 
@@ -64,8 +65,9 @@ class SessionItem(ListItem):
 
         # Meta line
         meta_parts = []
-        if s.modified:
-            meta_parts.append(format_date(s.modified))
+        activity = s.last_activity or s.modified
+        if activity:
+            meta_parts.append(format_date(activity))
         meta_parts.append(f"{s.message_count} msgs")
         if s.file_size:
             meta_parts.append(format_size(s.file_size))
@@ -110,7 +112,8 @@ class PreviewPanel(VerticalScroll):
         if s.git_branch:
             meta.append(f"[cyan]{s.git_branch}[/cyan]")
         meta.append(f"[dim]{result.display_project}[/dim]")
-        meta.append(f"[dim]{format_date(s.modified)} · {s.message_count} msgs · {result.score:.0%}[/dim]")
+        activity = s.last_activity or s.modified
+        meta.append(f"[dim]{format_date(activity)} · {s.message_count} msgs · {result.score:.0%}[/dim]")
         lines.append(" · ".join(meta))
 
         # Action hint at the top (visible without scrolling)
@@ -436,7 +439,7 @@ class RecallApp(App):
             id="search-input",
         )
         yield Label(
-            "Search by text, or use file: cmd: branch: prefixes",
+            f"claude-recall v{__version__} | Search by text, or use file: cmd: branch: prefixes",
             id="status",
         )
         with Horizontal(id="main"):
@@ -445,9 +448,11 @@ class RecallApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.title = "claude-recall"
+        self.title = f"claude-recall v{__version__}"
         if self._results and self.initial_query.strip():
             self._display_results(self._results)
+        elif not self.initial_query.strip():
+            self._load_recent()
         self.query_one("#search-input", Input).focus()
 
     @on(Input.Changed, "#search-input")
@@ -458,13 +463,12 @@ class RecallApp(App):
 
         if not query:
             status.update(
-                "Type to search  |  Prefixes: file:name  cmd:command  branch:name"
+                f"claude-recall v{__version__} | Recent sessions  |  Type to search, or use file: cmd: branch:"
             )
-            self.query_one("#results", ListView).clear()
             self._selected_result = None
-            # Clear preview
             preview = self.query_one("#preview", PreviewPanel)
-            preview._set_content("[dim]Type a query to search[/dim]")
+            preview._set_content("[dim]Select a recent session to preview[/dim]")
+            self._load_recent()
             return
 
         # Show what we're searching for — user knows search is happening
@@ -547,6 +551,20 @@ class RecallApp(App):
             )
 
     @work(exclusive=True, thread=True)
+    def _load_recent(self) -> None:
+        """Load recent sessions for the empty-query browse state."""
+        from claude_recall.config import load_config
+        from claude_recall.searcher import recent_sessions
+
+        limit = load_config().get("limit", 20)
+        kwargs = {"limit": limit}
+        if self._db_path:
+            kwargs["db_path"] = self._db_path
+        results = recent_sessions(**kwargs)
+        self._results = results
+        self.call_from_thread(self._display_results, results, "")
+
+    @work(exclusive=True, thread=True)
     def _debounced_search(self, query: str) -> None:
         """Search with debounce (runs in a thread)."""
         import time
@@ -554,7 +572,16 @@ class RecallApp(App):
         time.sleep(0.5)
 
         if not query.strip():
-            self.call_from_thread(self._display_results, [], "")
+            from claude_recall.config import load_config
+            from claude_recall.searcher import recent_sessions
+
+            limit = load_config().get("limit", 20)
+            kwargs = {"limit": limit}
+            if self._db_path:
+                kwargs["db_path"] = self._db_path
+            results = recent_sessions(**kwargs)
+            self._results = results
+            self.call_from_thread(self._display_results, results, "")
             return
 
         # Check if the query changed while we were waiting
@@ -585,13 +612,18 @@ class RecallApp(App):
             if query:
                 status.update(f'No results for "{query}"')
             else:
-                status.update("No results")
+                status.update("No indexed sessions found")
             return
 
-        status.update(
-            f'Found {len(results)} sessions for "{query}" — '
-            f"↓ to navigate, Enter to resume"
-        )
+        if query:
+            status.update(
+                f'v{__version__} | Found {len(results)} sessions for "{query}" — '
+                f"↓ to navigate, Enter to resume"
+            )
+        else:
+            status.update(
+                f"v{__version__} | Recent sessions across all projects — {len(results)} shown"
+            )
 
         # batch_update prevents intermediate repaints (no flicker)
         with self.batch_update():

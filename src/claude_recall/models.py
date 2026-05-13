@@ -24,6 +24,7 @@ class Session:
     file_size: int = 0
     created: str | None = None
     modified: str | None = None
+    last_activity: str | None = None
     mtime: float = 0.0
     is_subagent: bool = False
     parent_session: str | None = None

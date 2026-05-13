@@ -105,7 +105,8 @@ class TestSchema:
             "session_id", "project_path", "project_dir", "file_path",
             "summary", "first_prompt", "first_reply", "last_prompt", "last_reply",
             "messages_text", "git_branch", "message_count", "file_size",
-            "created", "modified", "mtime", "is_subagent", "parent_session",
+            "created", "modified", "last_activity", "mtime",
+            "is_subagent", "parent_session",
         }
         assert expected.issubset(cols)
 

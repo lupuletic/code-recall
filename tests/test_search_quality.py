@@ -8,14 +8,19 @@ They are skipped when no index exists (CI environments).
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from claude_recall.db import DB_PATH
 
 
 pytestmark = pytest.mark.skipif(
-    not DB_PATH.exists(),
-    reason="No index found — run 'claude-recall index' first",
+    os.environ.get("CLAUDE_RECALL_RUN_QUALITY_TESTS") != "1" or not DB_PATH.exists(),
+    reason=(
+        "Search quality benchmark requires a representative local index and "
+        "CLAUDE_RECALL_RUN_QUALITY_TESTS=1"
+    ),
 )
 
 

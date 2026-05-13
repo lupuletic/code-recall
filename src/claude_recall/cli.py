@@ -121,6 +121,7 @@ def _auto_install_hooks() -> None:
         return
 
     hook_command = f"{claude_recall_bin} index --quiet"
+    desired_hook = _index_hook_config(hook_command)
 
     settings = {}
     if settings_path.exists():
@@ -137,20 +138,26 @@ def _auto_install_hooks() -> None:
     for rule in session_end_hooks:
         for hook in rule.get("hooks", []):
             if "claude-recall" in hook.get("command", ""):
-                HOOKS_MARKER.parent.mkdir(parents=True, exist_ok=True)
-                HOOKS_MARKER.touch()
+                hook.update(desired_hook)
+                try:
+                    settings_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(settings_path, "w") as f:
+                        json.dump(settings, f, indent=2)
+                    HOOKS_MARKER.parent.mkdir(parents=True, exist_ok=True)
+                    HOOKS_MARKER.touch()
+                except OSError:
+                    pass
                 return
 
     new_hook = {
-        "hooks": [
-            {"type": "command", "command": hook_command, "timeout": 30000}
-        ]
+        "hooks": [desired_hook]
     }
     session_end_hooks.append(new_hook)
     hooks["SessionEnd"] = session_end_hooks
     settings["hooks"] = hooks
 
     try:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
         with open(settings_path, "w") as f:
             json.dump(settings, f, indent=2)
         HOOKS_MARKER.parent.mkdir(parents=True, exist_ok=True)
@@ -262,8 +269,9 @@ def _print_plain(query: str, results: list) -> None:
         print(f" {i:>2}. {title:<52} {score_str}")
 
         meta_parts = [r.display_project]
-        if s.modified:
-            meta_parts.append(format_date(s.modified))
+        activity = s.last_activity or s.modified
+        if activity:
+            meta_parts.append(format_date(activity))
         if s.git_branch:
             meta_parts.append(s.git_branch)
         meta_parts.append(f"{s.message_count} msgs")
@@ -300,6 +308,7 @@ def _print_json(results: list) -> None:
             "message_count": s.message_count,
             "file_size": s.file_size,
             "modified": s.modified,
+            "last_activity": s.last_activity,
             "score": round(r.score, 4),
             "fts_rank": r.fts_rank,
             "vec_score": round(r.vec_score, 4) if r.vec_score is not None else None,
@@ -416,6 +425,7 @@ def _cmd_install_hooks() -> None:
         claude_recall_bin = "claude-recall"
 
     hook_command = f"{claude_recall_bin} index --quiet"
+    desired_hook = _index_hook_config(hook_command)
 
     settings = {}
     if settings_path.exists():
@@ -431,19 +441,22 @@ def _cmd_install_hooks() -> None:
     for rule in session_end_hooks:
         for hook in rule.get("hooks", []):
             if "claude-recall" in hook.get("command", ""):
-                print("Hook already installed!")
-                print(f"  Command: {hook['command']}")
+                hook.update(desired_hook)
+                settings_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(settings_path, "w") as f:
+                    json.dump(settings, f, indent=2)
+                print("Hook already installed; refreshed config.")
+                print(f"  Command: {desired_hook['command']}")
                 return
 
     new_hook = {
-        "hooks": [
-            {"type": "command", "command": hook_command, "timeout": 30000}
-        ]
+        "hooks": [desired_hook]
     }
     session_end_hooks.append(new_hook)
     hooks["SessionEnd"] = session_end_hooks
     settings["hooks"] = hooks
 
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
     with open(settings_path, "w") as f:
         json.dump(settings, f, indent=2)
 
@@ -455,6 +468,16 @@ def _cmd_install_hooks() -> None:
     print(f"  Command: {hook_command}")
     print()
     print("Index will auto-update when you exit Claude Code sessions.")
+
+
+def _index_hook_config(command: str) -> dict:
+    """Return Claude Code hook config for non-blocking index updates."""
+    return {
+        "type": "command",
+        "command": command,
+        "timeout": 30,
+        "async": True,
+    }
 
 
 if __name__ == "__main__":

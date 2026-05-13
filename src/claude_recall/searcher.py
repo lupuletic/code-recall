@@ -80,6 +80,62 @@ def search(
         conn.close()
 
 
+def recent_sessions(
+    db_path: Path = DB_PATH,
+    limit: int = 20,
+    project_filter: str | None = None,
+    min_messages: int = 1,
+) -> list[SearchResult]:
+    """Return sessions by actual last conversation activity for browsing."""
+    conn = get_connection(db_path)
+    try:
+        return _recent_sessions(conn, limit, project_filter, min_messages)
+    finally:
+        conn.close()
+
+
+def _recent_sessions(
+    conn: sqlite3.Connection,
+    limit: int,
+    project_filter: str | None,
+    min_messages: int,
+) -> list[SearchResult]:
+    where_parts = []
+    sub_clause = _subagent_filter_clause()
+    if sub_clause:
+        where_parts.append(sub_clause.lstrip("AND "))
+    params: list = []
+    if project_filter:
+        where_parts.append("s.project_path LIKE ?")
+        params.append(f"%{project_filter}%")
+    if min_messages > 0:
+        where_parts.append("s.message_count >= ?")
+        params.append(min_messages)
+
+    where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+    params.append(limit)
+
+    rows = conn.execute(
+        f"""SELECT s.*
+            FROM sessions s
+            {where_clause}
+            ORDER BY COALESCE(s.last_activity, s.modified, s.created, '') DESC, s.mtime DESC
+            LIMIT ?""",
+        params,
+    ).fetchall()
+
+    results = []
+    for i, row in enumerate(rows):
+        session = _row_to_session(row)
+        snippet = session.last_prompt or session.first_prompt or session.summary
+        results.append(SearchResult(
+            session=session,
+            score=1.0 - (i / max(len(rows), 1)),
+            snippets=[snippet] if snippet else [],
+        ))
+    return results
+
+
 def _search_pipeline(
     conn, query, limit, project_filter, after, before, semantic, min_messages,
 ) -> list[SearchResult]:
@@ -138,6 +194,12 @@ def _search_pipeline(
     with Timer("FTS5 search", log):
         fts_results = _fts_search(conn, query, fts_fetch, project_filter, after, before, min_messages)
 
+    # Phase 1b: Knowledge graph candidates. These catch exact structural
+    # memories such as file names, command names, branches, and project names
+    # even when the transcript text is sparse or tokenized poorly.
+    with Timer("graph search", log):
+        graph_results = _graph_search(conn, query, fts_fetch, project_filter, after, before, min_messages)
+
     # Phase 2: If strict AND found too few results, try broader searches.
     if len(fts_results) < 3:
         seen = {r.session.session_id for r in fts_results}
@@ -181,6 +243,15 @@ def _search_pipeline(
                         seen.add(r.session.session_id)
 
     if not use_semantic:
+        if graph_results:
+            fts_results = _reciprocal_rank_fusion(
+                fts_results,
+                [],
+                graph_results,
+                alpha=0.55,
+                graph_weight=0.65,
+                k=60,
+            )
         # Apply boosts before final normalization
         _apply_depth_boost(fts_results)
         _apply_project_path_boost(query, fts_results)
@@ -199,13 +270,20 @@ def _search_pipeline(
     with Timer("semantic search", log):
         vec_results = _vec_search(conn, query, limit * 3, project_filter, after, before, min_messages)
 
-    log.debug(f"FTS: {len(fts_results)} results, semantic: {use_semantic}")
+    log.debug(f"FTS: {len(fts_results)} results, graph: {len(graph_results)}, semantic: {use_semantic}")
 
     # Phase 4: Hybrid ranking — weight semantic MORE when FTS found few results
     fts_strength = min(len(fts_results) / 5, 1.0)
     alpha = 0.3 + 0.3 * fts_strength
 
-    combined = _reciprocal_rank_fusion(fts_results, vec_results, alpha=alpha, k=60)
+    combined = _reciprocal_rank_fusion(
+        fts_results,
+        vec_results,
+        graph_results,
+        alpha=alpha,
+        graph_weight=0.25,
+        k=60,
+    )
 
     # Phase 5: Cross-encoder reranking
     with Timer("cross-encoder rerank", log):
@@ -602,16 +680,167 @@ def _vec_search(
     return results
 
 
+def _graph_search(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+    project_filter: str | None,
+    after: str | None,
+    before: str | None,
+    min_messages: int,
+) -> list[SearchResult]:
+    """Search graph metadata as a first-class candidate source.
+
+    This is intentionally lexical and conservative. It looks for exact-ish
+    matches in project paths, touched files, commands, and branches, then lets
+    fusion/reranking decide final order.
+    """
+    terms = [
+        t.strip(".,:;()[]{}\"'`").lower()
+        for t in query.lower().split()
+        if t not in _STOP_WORDS and len(t.strip(".,:;()[]{}\"'`")) > 2
+    ]
+    terms = list(dict.fromkeys(t for t in terms if t))
+    if not terms:
+        return []
+
+    phrase = " ".join(terms)
+    phrase_hyphen = "-".join(terms)
+
+    where_parts = []
+    sub_clause = _subagent_filter_clause()
+    if sub_clause:
+        where_parts.append(sub_clause.lstrip("AND "))
+    params: list = []
+    if project_filter:
+        where_parts.append("s.project_path LIKE ?")
+        params.append(f"%{project_filter}%")
+    if after:
+        where_parts.append("s.modified >= ?")
+        params.append(after)
+    if before:
+        where_parts.append("s.modified <= ?")
+        params.append(before)
+    if min_messages > 0:
+        where_parts.append("s.message_count >= ?")
+        params.append(min_messages)
+
+    where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+    rows = conn.execute(f"SELECT s.* FROM sessions s {where_clause}", params).fetchall()
+
+    by_id: dict[str, SearchResult] = {}
+
+    def add(row: sqlite3.Row, score: float, snippet: str) -> None:
+        sid = row["session_id"]
+        existing = by_id.get(sid)
+        if existing is None:
+            by_id[sid] = SearchResult(
+                session=_row_to_session(row),
+                score=score,
+                snippets=[snippet],
+            )
+            return
+        existing.score += score
+        if snippet and snippet not in existing.snippets:
+            existing.snippets.append(snippet)
+
+    # Project path matches are often the strongest clue for vague recall.
+    for row in rows:
+        path = (row["project_path"] or "").lower()
+        if not path:
+            continue
+        term_matches = sum(1 for t in terms if t in path)
+        if phrase and phrase in path:
+            term_matches += 2
+        if phrase_hyphen and phrase_hyphen in path:
+            term_matches += 2
+        if term_matches:
+            all_terms_bonus = 1.0 if all(t in path for t in terms) else 0.0
+            add(
+                row,
+                1.0 + (0.35 * term_matches) + all_terms_bonus,
+                f"Project: {row['project_path']}",
+            )
+
+    def matched_text_score(text: str, name: str = "") -> tuple[float, bool]:
+        text_l = text.lower()
+        name_l = name.lower()
+        score = 0.0
+        matched = False
+        for t in terms:
+            if t in text_l:
+                score += 0.6
+                matched = True
+            if name_l and t in name_l:
+                score += 0.4
+        for p in (phrase, phrase_hyphen):
+            if len(p) > 2 and p in text_l:
+                score += 1.2
+                matched = True
+        return score, matched
+
+    file_rows = conn.execute(
+        f"""SELECT s.*,
+                   sf.file_path AS matched_file_path,
+                   sf.file_name AS matched_file_name,
+                   sf.action AS matched_file_action
+            FROM session_files sf
+            JOIN sessions s ON s.session_id = sf.session_id
+            {where_clause}""",
+        params,
+    ).fetchall()
+    for row in file_rows:
+        score, matched = matched_text_score(
+            row["matched_file_path"] or "",
+            row["matched_file_name"] or "",
+        )
+        if matched:
+            add(
+                row,
+                score + 0.4,
+                f"{row['matched_file_action'].title()}ed: {row['matched_file_path']}",
+            )
+
+    command_rows = conn.execute(
+        f"""SELECT s.*, sc.command, sc.command_name
+            FROM session_commands sc
+            JOIN sessions s ON s.session_id = sc.session_id
+            {where_clause}""",
+        params,
+    ).fetchall()
+    for row in command_rows:
+        score, matched = matched_text_score(row["command"] or "", row["command_name"] or "")
+        if matched:
+            add(row, score + 0.2, f"Ran: {row['command']}")
+
+    for row in rows:
+        branch = " ".join(filter(None, [row["git_branch"], row["git_branch_detected"]]))
+        if not branch:
+            continue
+        score, matched = matched_text_score(branch)
+        if matched:
+            add(row, score + 0.3, f"Branch: {branch}")
+
+    results = list(by_id.values())
+    results.sort(key=lambda r: r.score, reverse=True)
+    return results[:limit]
+
+
 def _reciprocal_rank_fusion(
     fts_results: list[SearchResult],
     vec_results: list[SearchResult],
+    graph_results: list[SearchResult] | None = None,
     alpha: float = 0.6,
+    graph_weight: float = 0.0,
     k: int = 60,
 ) -> list[SearchResult]:
     """Combine FTS5 and vector search results using RRF.
 
     score = alpha / (k + fts_rank) + (1 - alpha) / (k + vec_rank)
+            + graph_weight / (k + graph_rank)
     """
+    graph_results = graph_results or []
+
     # Build lookup by session_id
     fts_map: dict[str, tuple[int, SearchResult]] = {}
     for rank, r in enumerate(fts_results):
@@ -621,21 +850,29 @@ def _reciprocal_rank_fusion(
     for rank, r in enumerate(vec_results):
         vec_map[r.session.session_id] = (rank, r)
 
-    all_ids = set(fts_map.keys()) | set(vec_map.keys())
-    absent_rank = max(len(fts_results), len(vec_results)) + 100
+    graph_map: dict[str, tuple[int, SearchResult]] = {}
+    for rank, r in enumerate(graph_results):
+        graph_map[r.session.session_id] = (rank, r)
 
+    all_ids = set(fts_map.keys()) | set(vec_map.keys()) | set(graph_map.keys())
     combined: list[SearchResult] = []
     for sid in all_ids:
-        fts_rank = fts_map[sid][0] if sid in fts_map else absent_rank
-        vec_rank = vec_map[sid][0] if sid in vec_map else absent_rank
-
-        rrf_score = alpha / (k + fts_rank) + (1 - alpha) / (k + vec_rank)
+        vec_weight = 1 - alpha
+        rrf_score = 0.0
+        if sid in fts_map:
+            rrf_score += alpha / (k + fts_map[sid][0])
+        if sid in vec_map:
+            rrf_score += vec_weight / (k + vec_map[sid][0])
+        if sid in graph_map:
+            rrf_score += graph_weight / (k + graph_map[sid][0])
 
         # Pick the result object with the most info
         if sid in fts_map:
             result = fts_map[sid][1]
-        else:
+        elif sid in vec_map:
             result = vec_map[sid][1]
+        else:
+            result = graph_map[sid][1]
 
         # Merge snippets from both sources
         if sid in fts_map and sid in vec_map:
@@ -643,9 +880,16 @@ def _reciprocal_rank_fusion(
             for s in vec_map[sid][1].snippets:
                 if s not in seen:
                     result.snippets.append(s)
+                    seen.add(s)
+        if sid in graph_map:
+            seen = set(result.snippets)
+            for s in graph_map[sid][1].snippets:
+                if s not in seen:
+                    result.snippets.append(s)
+                    seen.add(s)
 
         result.score = rrf_score
-        result.fts_rank = fts_rank if sid in fts_map else None
+        result.fts_rank = fts_map[sid][0] if sid in fts_map else None
         result.vec_score = vec_map[sid][1].vec_score if sid in vec_map else None
 
         combined.append(result)
@@ -1196,6 +1440,7 @@ def _row_to_session(row: sqlite3.Row) -> Session:
         file_size=row["file_size"],
         created=row["created"],
         modified=row["modified"],
+        last_activity=row["last_activity"] if "last_activity" in row.keys() else None,
         mtime=row["mtime"],
         is_subagent=bool(row["is_subagent"]),
         parent_session=row["parent_session"],

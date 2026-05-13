@@ -278,6 +278,32 @@ class TestParseSessionFile:
         assert len(result["messages_text"]) > 0
         assert isinstance(result["chunks"], list)
         assert len(result["chunks"]) > 0
+        assert result["first_activity"] is None
+        assert result["last_activity"] is None
+
+    def test_activity_timestamps(self, tmp_path):
+        lines = [
+            json.dumps({
+                "type": "user",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "message": {"role": "user", "content": "hello"},
+            }),
+            json.dumps({
+                "type": "assistant",
+                "timestamp": "2025-01-01T10:01:00Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "hi"}]},
+            }),
+            json.dumps({
+                "type": "user",
+                "timestamp": "2025-01-01T10:02:00Z",
+                "message": {"role": "user", "content": "bye"},
+            }),
+        ]
+        p = tmp_path / "timestamps.jsonl"
+        p.write_text("\n".join(lines))
+        result = parse_session_file(p)
+        assert result["first_activity"] == "2025-01-01T10:00:00Z"
+        assert result["last_activity"] == "2025-01-01T10:02:00Z"
 
     def test_with_markup(self, sample_jsonl_file_with_markup):
         result = parse_session_file(sample_jsonl_file_with_markup)

@@ -163,6 +163,8 @@ def parse_session_file(file_path: str | Path) -> dict:
     files_modified: set[str] = set()
     commands_run: list[str] = []
     git_branch_detected: str | None = None
+    first_activity: str | None = None
+    last_activity: str | None = None
 
     # Commands to skip (low signal)
     _SKIP_CMDS = {"cd", "ls", "cat", "echo", "pwd", "head", "tail", "wc", "true", "false"}
@@ -179,8 +181,13 @@ def parse_session_file(file_path: str | Path) -> dict:
                     continue
 
                 msg_type = obj.get("type")
+                timestamp = obj.get("timestamp")
 
                 if msg_type == "user":
+                    if timestamp:
+                        if first_activity is None:
+                            first_activity = timestamp
+                        last_activity = timestamp
                     msg = obj.get("message", {})
                     text = extract_text_from_content(msg.get("content", ""))
                     if text:
@@ -193,6 +200,10 @@ def parse_session_file(file_path: str | Path) -> dict:
                             last_prompt = cleaned[:MAX_FIRST_PROMPT]
 
                 elif msg_type == "assistant":
+                    if timestamp:
+                        if first_activity is None:
+                            first_activity = timestamp
+                        last_activity = timestamp
                     msg = obj.get("message", {})
                     content = msg.get("content", [])
                     text = extract_text_from_content(content)
@@ -271,6 +282,8 @@ def parse_session_file(file_path: str | Path) -> dict:
         "files_modified": sorted(files_modified)[:50],
         "commands_run": commands_run,
         "git_branch_detected": git_branch_detected,
+        "first_activity": first_activity,
+        "last_activity": last_activity,
     }
 
 
