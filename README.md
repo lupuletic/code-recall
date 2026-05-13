@@ -7,7 +7,7 @@ Semantic search with cross-encoder reranking and a knowledge graph across all yo
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-288%20passing-34D058.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-301%20passing-34D058.svg)](#development)
 [![Search Accuracy](https://img.shields.io/badge/search%20accuracy-93%25-34D058.svg)](#search-quality)
 [![Sessions](https://img.shields.io/badge/sessions-2%2C003-8B5CF6.svg)](#search-quality)
 [![Knowledge Graph](https://img.shields.io/badge/knowledge%20graph-3%2C124%20edges-F59E0B.svg)](#knowledge-graph)
@@ -169,6 +169,10 @@ claude-recall "migration" --after 2026-01-01
 # Output formats
 claude-recall "query" --no-tui      # plain text
 claude-recall "query" --json        # JSON for scripting
+
+# Updates
+claude-recall update                # show latest version and upgrade command
+claude-recall update --yes          # run the detected upgrade command
 ```
 
 ### Structured Search Prefixes
@@ -326,6 +330,25 @@ python -m pytest tests/ -q     # unit/integration tests
 
 # Optional: benchmark against your own populated Claude Code index
 CLAUDE_RECALL_RUN_QUALITY_TESTS=1 python -m pytest tests/test_search_quality.py -v
+```
+
+## Release
+
+Releases are tag driven. CI verifies the version declarations match before publishing.
+The release workflow builds distributions, publishes to PyPI through Trusted Publishing,
+and creates or updates the matching GitHub release.
+
+Before the first release, configure a PyPI Trusted Publisher for this repository and the
+`pypi` GitHub environment.
+
+```bash
+uv run python scripts/check_version.py
+uv run pytest -q
+uv run python -m compileall -q src tests
+uv build --no-sources
+
+git tag v0.1.3
+git push origin main --tags
 ```
 
 ## License

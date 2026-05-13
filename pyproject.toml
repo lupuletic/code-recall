@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-recall"
-version = "0.1.2"
+version = "0.1.3"
 description = "Semantic search across Claude Code sessions. Find past conversations by intent, not just keywords."
 readme = "README.md"
 license = "MIT"

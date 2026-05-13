@@ -52,6 +52,7 @@ def _run(argv: list[str] | None = None) -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Show debug logs")
     parser.add_argument("--force", action="store_true", help="Force full reindex (with 'index')")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    parser.add_argument("-y", "--yes", action="store_true", help="Confirm update command")
 
     args = parser.parse_args(argv)
 
@@ -74,6 +75,8 @@ def _run(argv: list[str] | None = None) -> None:
         _cmd_gc(args)
     elif command == "config":
         _cmd_config(args)
+    elif command == "update":
+        _cmd_update(args)
     elif command in ("install-hooks", "setup"):
         _cmd_install_hooks()
     elif command == "search" or command == "s":
@@ -87,7 +90,7 @@ def _run(argv: list[str] | None = None) -> None:
     # Non-blocking update check (once per day)
     from claude_recall.updater import check_for_update
 
-    check_for_update(quiet=args.quiet or args.json_output)
+    check_for_update(quiet=args.quiet or args.json_output or command == "update")
 
 
 def _first_run_setup(args: argparse.Namespace) -> None:
@@ -184,6 +187,15 @@ def _cmd_config(args: argparse.Namespace) -> None:
         print(f"Set {key} = {value}")
     else:
         print_config()
+
+
+def _cmd_update(args: argparse.Namespace) -> None:
+    """Check for and optionally install the latest release."""
+    from claude_recall.updater import run_update
+
+    code = run_update(yes=args.yes, quiet=args.quiet)
+    if code:
+        sys.exit(code)
 
 
 def _cmd_search(args: argparse.Namespace) -> None:

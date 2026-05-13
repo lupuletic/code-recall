@@ -73,6 +73,31 @@ class TestIndexCommand:
 
 
 # ===========================================================================
+# update subcommand
+# ===========================================================================
+
+class TestUpdateCommand:
+    @patch("claude_recall.updater.run_update", return_value=0)
+    def test_update_runs_without_confirmation(self, mock_run_update):
+        main(["update"])
+
+        mock_run_update.assert_called_once_with(yes=False, quiet=False)
+
+    @patch("claude_recall.updater.run_update", return_value=0)
+    def test_update_yes_passes_confirmation(self, mock_run_update):
+        main(["update", "--yes"])
+
+        mock_run_update.assert_called_once_with(yes=True, quiet=False)
+
+    @patch("claude_recall.updater.run_update", return_value=1)
+    def test_update_exits_on_failure(self, mock_run_update):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["update", "--yes"])
+
+        assert exc_info.value.code == 1
+
+
+# ===========================================================================
 # search (direct query routing)
 # ===========================================================================
 
