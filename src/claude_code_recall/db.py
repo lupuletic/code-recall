@@ -1,13 +1,14 @@
-"""SQLite database management for claude-recall."""
+"""SQLite database management for claude-code-recall."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-from claude_recall.models import Session
+from claude_code_recall.models import Session
+from claude_code_recall.utils import app_data_dir
 
-DB_DIR = Path.home() / ".claude-recall"
+DB_DIR = app_data_dir()
 DB_PATH = DB_DIR / "index.db"
 
 SCHEMA_VERSION = 3

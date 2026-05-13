@@ -1,4 +1,4 @@
-"""Tests for claude_recall.cli."""
+"""Tests for claude_code_recall.cli."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_recall.cli import main
+from claude_code_recall.cli import main
 
 
 @pytest.fixture(autouse=True)
@@ -21,12 +21,12 @@ def isolate_env(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     hooks_marker = tmp_path / ".hooks-installed"
 
-    monkeypatch.setattr("claude_recall.cli.DB_PATH", db_path)
-    monkeypatch.setattr("claude_recall.cli.PROJECTS_DIR", projects_dir)
-    monkeypatch.setattr("claude_recall.cli.HOOKS_MARKER", hooks_marker)
-    monkeypatch.setattr("claude_recall.config.CONFIG_PATH", config_path)
-    monkeypatch.setattr("claude_recall.db.DB_PATH", db_path)
-    monkeypatch.setattr("claude_recall.utils.PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr("claude_code_recall.cli.DB_PATH", db_path)
+    monkeypatch.setattr("claude_code_recall.cli.PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr("claude_code_recall.cli.HOOKS_MARKER", hooks_marker)
+    monkeypatch.setattr("claude_code_recall.config.CONFIG_PATH", config_path)
+    monkeypatch.setattr("claude_code_recall.db.DB_PATH", db_path)
+    monkeypatch.setattr("claude_code_recall.utils.PROJECTS_DIR", projects_dir)
 
     return {
         "db_path": db_path,
@@ -45,7 +45,7 @@ class TestVersion:
             main(["--version"])
         assert exc_info.value.code == 0
         out = capsys.readouterr().out
-        assert "claude-recall" in out
+        assert "claude-code-recall" in out
 
 
 # ===========================================================================
@@ -56,14 +56,14 @@ class TestIndexCommand:
     def test_index_runs(self, capsys, isolate_env):
         """'index' subcommand should run without error."""
         # Suppress ensure_models_downloaded
-        with patch("claude_recall.cli.build_index", return_value={
+        with patch("claude_code_recall.cli.build_index", return_value={
             "indexed": 0, "skipped": 0, "removed": 0, "errors": 0,
             "embeddings": 0, "elapsed": 0.1, "total_discovered": 0,
         }):
             main(["index", "--quiet"])
 
     def test_index_force(self, isolate_env):
-        with patch("claude_recall.cli.build_index", return_value={
+        with patch("claude_code_recall.cli.build_index", return_value={
             "indexed": 5, "skipped": 0, "removed": 0, "errors": 0,
             "embeddings": 0, "elapsed": 0.5, "total_discovered": 5,
         }) as mock_build:
@@ -77,19 +77,19 @@ class TestIndexCommand:
 # ===========================================================================
 
 class TestUpdateCommand:
-    @patch("claude_recall.updater.run_update", return_value=0)
+    @patch("claude_code_recall.updater.run_update", return_value=0)
     def test_update_runs_without_confirmation(self, mock_run_update):
         main(["update"])
 
         mock_run_update.assert_called_once_with(yes=False, quiet=False)
 
-    @patch("claude_recall.updater.run_update", return_value=0)
+    @patch("claude_code_recall.updater.run_update", return_value=0)
     def test_update_yes_passes_confirmation(self, mock_run_update):
         main(["update", "--yes"])
 
         mock_run_update.assert_called_once_with(yes=True, quiet=False)
 
-    @patch("claude_recall.updater.run_update", return_value=1)
+    @patch("claude_code_recall.updater.run_update", return_value=1)
     def test_update_exits_on_failure(self, mock_run_update):
         with pytest.raises(SystemExit) as exc_info:
             main(["update", "--yes"])
@@ -102,8 +102,8 @@ class TestUpdateCommand:
 # ===========================================================================
 
 class TestSearchCommand:
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_direct_query(self, mock_search, mock_setup, capsys, isolate_env):
         """Positional args without subcommand should route to search."""
         main(["auth", "middleware", "--no-tui"])
@@ -111,16 +111,16 @@ class TestSearchCommand:
         call_kwargs = mock_search.call_args
         assert call_kwargs[1]["query"] == "auth middleware"
 
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_search_subcommand(self, mock_search, mock_setup, capsys, isolate_env):
         """'search' subcommand should strip the command and search."""
         main(["search", "debug", "auth", "--no-tui"])
         mock_search.assert_called_once()
         assert mock_search.call_args[1]["query"] == "debug auth"
 
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_s_alias(self, mock_search, mock_setup, capsys, isolate_env):
         """'s' should be an alias for 'search'."""
         main(["s", "test", "query", "--no-tui"])
@@ -133,11 +133,11 @@ class TestSearchCommand:
 # ===========================================================================
 
 class TestJsonOutput:
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search")
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search")
     def test_json_output_valid(self, mock_search, mock_setup, capsys, isolate_env):
         """--json should output valid JSON."""
-        from claude_recall.models import SearchResult, Session
+        from claude_code_recall.models import SearchResult, Session
 
         mock_search.return_value = [
             SearchResult(
@@ -164,8 +164,8 @@ class TestJsonOutput:
         assert data[0]["session_id"] == "test1"
         assert data[0]["score"] == 0.95
 
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_json_empty_results(self, mock_search, mock_setup, capsys, isolate_env):
         main(["nonsense", "--json"])
         output = capsys.readouterr().out
@@ -178,8 +178,8 @@ class TestJsonOutput:
 # ===========================================================================
 
 class TestNoTui:
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_no_tui_flag(self, mock_search, mock_setup, capsys, isolate_env):
         """--no-tui should output plain text."""
         main(["test", "query", "--no-tui"])
@@ -192,26 +192,26 @@ class TestNoTui:
 # ===========================================================================
 
 class TestFilterPassthrough:
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_project_filter(self, mock_search, mock_setup, isolate_env):
         main(["test", "--project", "myapp", "--no-tui"])
         assert mock_search.call_args[1]["project_filter"] == "myapp"
 
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_after_filter(self, mock_search, mock_setup, isolate_env):
         main(["test", "--after", "2025-01-01", "--no-tui"])
         assert mock_search.call_args[1]["after"] == "2025-01-01"
 
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_before_filter(self, mock_search, mock_setup, isolate_env):
         main(["test", "--before", "2025-12-31", "--no-tui"])
         assert mock_search.call_args[1]["before"] == "2025-12-31"
 
-    @patch("claude_recall.cli._first_run_setup")
-    @patch("claude_recall.cli.search", return_value=[])
+    @patch("claude_code_recall.cli._first_run_setup")
+    @patch("claude_code_recall.cli.search", return_value=[])
     def test_limit(self, mock_search, mock_setup, isolate_env):
         main(["test", "-n", "5", "--no-tui"])
         assert mock_search.call_args[1]["limit"] == 5
@@ -230,8 +230,8 @@ class TestInfoCommand:
 
     def test_info_with_db(self, capsys, isolate_env):
         """Info with a DB should show stats."""
-        from claude_recall.db import get_connection, upsert_session
-        from claude_recall.models import Session
+        from claude_code_recall.db import get_connection, upsert_session
+        from claude_code_recall.models import Session
 
         db_path = isolate_env["db_path"]
         conn = get_connection(db_path)

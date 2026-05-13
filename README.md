@@ -1,13 +1,13 @@
 <div align="center">
 
-# claude-recall
+# claude-code-recall
 
 **Find any Claude Code session instantly.**
 Semantic search with cross-encoder reranking and a knowledge graph across all your past conversations.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-301%20passing-34D058.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-302%20passing-34D058.svg)](#development)
 [![Search Accuracy](https://img.shields.io/badge/search%20accuracy-93%25-34D058.svg)](#search-quality)
 [![Sessions](https://img.shields.io/badge/sessions-2%2C003-8B5CF6.svg)](#search-quality)
 [![Knowledge Graph](https://img.shields.io/badge/knowledge%20graph-3%2C124%20edges-F59E0B.svg)](#knowledge-graph)
@@ -17,15 +17,15 @@ Semantic search with cross-encoder reranking and a knowledge graph across all yo
 ---
 
 ```bash
-pip install claude-recall[all]
-claude-recall "debugging the auth middleware"
+pip install 'claude-code-recall[all]'
+claude-code-recall "debugging the auth middleware"
 ```
 
 ## The Problem
 
 You accumulate hundreds of Claude Code sessions across dozens of projects. Built-in `/resume` only shows 10 recent sessions with basic name matching. You can't find the session where you debugged that auth issue, optimized the database, or set up CI/CD.
 
-**claude-recall** indexes all your sessions and searches them with a 6-stage pipeline — keyword matching, semantic embeddings, cross-encoder reranking, and optional LLM-powered understanding. A knowledge graph connects sessions through shared files, branches, and commands so you can trace how work flows across sessions.
+**claude-code-recall** indexes all your sessions and searches them with a 6-stage pipeline — keyword matching, semantic embeddings, cross-encoder reranking, and optional LLM-powered understanding. A knowledge graph connects sessions through shared files, branches, and commands so you can trace how work flows across sessions.
 
 ## How It Works
 
@@ -114,12 +114,12 @@ The knowledge graph powers two features:
 
 ```bash
 # Everything
-pip install claude-recall[all]
+pip install 'claude-code-recall[all]'
 
 # Or pick what you need
-pip install claude-recall                  # keyword search only (zero deps)
-pip install claude-recall[semantic]        # + embeddings + reranking
-pip install claude-recall[tui]             # + interactive terminal UI
+pip install claude-code-recall                  # keyword search only (zero deps)
+pip install 'claude-code-recall[semantic]'      # + embeddings + reranking
+pip install 'claude-code-recall[tui]'           # + interactive terminal UI
 ```
 </details>
 
@@ -127,7 +127,7 @@ pip install claude-recall[tui]             # + interactive terminal UI
 <summary><strong>uv</strong></summary>
 
 ```bash
-uv tool install claude-recall --with textual --with fastembed --with sqlite-vec
+uv tool install claude-code-recall --with textual --with fastembed --with sqlite-vec
 ```
 </details>
 
@@ -135,8 +135,8 @@ uv tool install claude-recall --with textual --with fastembed --with sqlite-vec
 <summary><strong>From source</strong></summary>
 
 ```bash
-git clone https://github.com/lupuletic/claude-recall
-cd claude-recall
+git clone https://github.com/lupuletic/claude-code-recall
+cd claude-code-recall
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
@@ -146,33 +146,33 @@ uv pip install -e ".[all]"
 
 ```bash
 # Interactive TUI — starts with recent sessions; type to search
-claude-recall
+claude-code-recall
 
 # Direct search
-claude-recall "debugging auth middleware"
-claude-recall "database migration script"
-claude-recall "setting up 2 git accounts"
+claude-code-recall "debugging auth middleware"
+claude-code-recall "database migration script"
+claude-code-recall "setting up 2 git accounts"
 
 # Structured search prefixes
-claude-recall "file:auth.py"              # find sessions that touched a specific file
-claude-recall "cmd:docker build"          # find sessions that ran a specific command
-claude-recall "branch:feature/oauth"      # find sessions on a specific branch
+claude-code-recall "file:auth.py"              # find sessions that touched a specific file
+claude-code-recall "cmd:docker build"          # find sessions that ran a specific command
+claude-code-recall "branch:feature/oauth"      # find sessions on a specific branch
 
 # Combine prefixes with regular queries
-claude-recall "file:schema.prisma migration"
-claude-recall "branch:main deploy"
+claude-code-recall "file:schema.prisma migration"
+claude-code-recall "branch:main deploy"
 
 # Filters
-claude-recall "optimization" --project myapp
-claude-recall "migration" --after 2026-01-01
+claude-code-recall "optimization" --project myapp
+claude-code-recall "migration" --after 2026-01-01
 
 # Output formats
-claude-recall "query" --no-tui      # plain text
-claude-recall "query" --json        # JSON for scripting
+claude-code-recall "query" --no-tui      # plain text
+claude-code-recall "query" --json        # JSON for scripting
 
 # Updates
-claude-recall update                # show latest version and upgrade command
-claude-recall update --yes          # run the detected upgrade command
+claude-code-recall update                # show latest version and upgrade command
+claude-code-recall update --yes          # run the detected upgrade command
 ```
 
 ### Structured Search Prefixes
@@ -200,16 +200,16 @@ Prefixes query the knowledge graph directly — no fuzzy matching, just exact lo
 
 With an empty search box, the TUI shows your most recent sessions across all indexed projects. The preview panel shows session details including **related sessions** — other sessions that share files with the selected one, powered by the knowledge graph. This lets you trace work across sessions without searching.
 
-When you resume a session, claude-recall `cd`s to the original project directory and runs `claude --resume` — you land right back where you left off.
+When you resume a session, claude-code-recall `cd`s to the original project directory and runs `claude --resume` — you land right back where you left off.
 
 ### Settings
 
 ```bash
-claude-recall config                              # view settings
-claude-recall config search_mode hybrid         # keyword + semantic + reranking (default)
-claude-recall config search_mode llm              # + Claude LLM reranking (best, ~10s)
-claude-recall config search_mode keyword          # FTS only (fastest, no deps)
-claude-recall config limit 20                     # more results
+claude-code-recall config                              # view settings
+claude-code-recall config search_mode hybrid         # keyword + semantic + reranking (default)
+claude-code-recall config search_mode llm              # + Claude LLM reranking (best, ~10s)
+claude-code-recall config search_mode keyword          # FTS only (fastest, no deps)
+claude-code-recall config limit 20                     # more results
 ```
 
 Or press `Ctrl+O` in the TUI for a visual settings panel with search mode, limits, and toggles.
@@ -291,7 +291,7 @@ Embeddings alone miss exact matches. Searching a project name should match insta
 
 ## Comparison
 
-| Feature | claude-recall | [recall](https://github.com/arjunkmrm/recall) | [search-sessions](https://github.com/sinzin91/search-sessions) | [claude-history](https://github.com/raine/claude-history) |
+| Feature | claude-code-recall | [recall](https://github.com/arjunkmrm/recall) | [search-sessions](https://github.com/sinzin91/search-sessions) | [claude-history](https://github.com/raine/claude-history) |
 |---------|:---:|:---:|:---:|:---:|
 | Keyword search | FTS5 + weighted BM25 | FTS5 + BM25 | ripgrep | Fuzzy |
 | Semantic search | Local embeddings | - | - | - |
@@ -312,7 +312,7 @@ Embeddings alone miss exact matches. Searching a project name should match insta
 
 ## First Run
 
-On first run, claude-recall:
+On first run, claude-code-recall:
 1. Builds a keyword index of all sessions (~8 seconds)
 2. Shows results immediately (keyword search works right away)
 3. Generates embeddings in the background (~2-3 minutes)
@@ -322,8 +322,8 @@ On first run, claude-recall:
 ## Development
 
 ```bash
-git clone https://github.com/lupuletic/claude-recall
-cd claude-recall
+git clone https://github.com/lupuletic/claude-code-recall
+cd claude-code-recall
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all,dev]"
 python -m pytest tests/ -q     # unit/integration tests
@@ -339,7 +339,18 @@ The release workflow builds distributions, publishes to PyPI through Trusted Pub
 and creates or updates the matching GitHub release.
 
 Before the first release, configure a PyPI Trusted Publisher for this repository and the
-`pypi` GitHub environment.
+`pypi` GitHub environment. The PyPI distribution name is `claude-code-recall`; the
+installed command remains `claude-code-recall`.
+
+Trusted Publisher fields:
+
+| Field | Value |
+|-------|-------|
+| PyPI project name | `claude-code-recall` |
+| Owner | `lupuletic` |
+| Repository name | `claude-code-recall` |
+| Workflow name | `release.yml` |
+| Environment name | `pypi` |
 
 ```bash
 uv run python scripts/check_version.py
@@ -347,7 +358,7 @@ uv run pytest -q
 uv run python -m compileall -q src tests
 uv build --no-sources
 
-git tag v0.1.3
+git tag v0.1.4
 git push origin main --tags
 ```
 

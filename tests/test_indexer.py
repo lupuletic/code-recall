@@ -1,4 +1,4 @@
-"""Tests for claude_recall.indexer."""
+"""Tests for claude_code_recall.indexer."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_recall.db import get_all_session_ids, get_connection, get_session_mtime
-from claude_recall.indexer import build_index
+from claude_code_recall.db import get_all_session_ids, get_connection, get_session_mtime
+from claude_code_recall.indexer import build_index
 
 
 class TestBuildIndex:
@@ -200,7 +200,7 @@ class TestBuildIndex:
 
         assert chunk_count > 0
 
-    @patch("claude_recall.indexer.has_semantic", return_value=False)
+    @patch("claude_code_recall.indexer.has_semantic", return_value=False)
     def test_no_semantic_deps(self, mock_semantic, projects_dir, db_path):
         """Should work fine without semantic dependencies."""
         stats = build_index(

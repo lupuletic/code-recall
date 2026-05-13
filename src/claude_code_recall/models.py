@@ -1,4 +1,4 @@
-"""Data models for claude-recall."""
+"""Data models for claude-code-recall."""
 
 from __future__ import annotations
 

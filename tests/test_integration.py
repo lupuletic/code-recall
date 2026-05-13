@@ -1,4 +1,4 @@
-"""End-to-end integration tests for claude-recall."""
+"""End-to-end integration tests for claude-code-recall."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_recall.db import get_all_session_ids, get_connection, get_stats
-from claude_recall.indexer import build_index
-from claude_recall.searcher import search
+from claude_code_recall.db import get_all_session_ids, get_connection, get_stats
+from claude_code_recall.indexer import build_index
+from claude_code_recall.searcher import search
 
 
 def _user_line(text: str) -> str:

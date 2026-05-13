@@ -1,4 +1,4 @@
-"""Interactive TUI for claude-recall using textual."""
+"""Interactive TUI for claude-code-recall using textual."""
 
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from claude_recall import __version__
-from claude_recall.models import SearchResult
-from claude_recall.utils import clean_display_text, format_date, format_size
+from claude_code_recall import __version__
+from claude_code_recall.models import SearchResult
+from claude_code_recall.utils import clean_display_text, format_date, format_size
 
 
 def _session_title(s, max_len: int = 80) -> str:
@@ -151,7 +151,7 @@ class PreviewPanel(VerticalScroll):
 
         # Related sessions
         try:
-            from claude_recall.db import DB_PATH, get_connection, get_related_sessions
+            from claude_code_recall.db import DB_PATH, get_connection, get_related_sessions
 
             use_db = db_path or DB_PATH
             conn = get_connection(use_db)
@@ -255,7 +255,7 @@ class SettingsScreen(ModalScreen):
     ]
 
     def compose(self) -> ComposeResult:
-        from claude_recall.config import SEARCH_MODES, load_config
+        from claude_code_recall.config import SEARCH_MODES, load_config
 
         self._config = load_config()
         self._mode_keys = list(SEARCH_MODES.keys())
@@ -338,7 +338,7 @@ class SettingsScreen(ModalScreen):
         self.dismiss(False)
 
     def _save_settings(self) -> None:
-        from claude_recall.config import save_config
+        from claude_code_recall.config import save_config
 
         # Search mode from OptionList
         ol = self.query_one("#mode-list", OptionList)
@@ -366,7 +366,7 @@ class SettingsScreen(ModalScreen):
 
 
 class RecallApp(App):
-    """claude-recall interactive session search."""
+    """claude-code-recall interactive session search."""
 
     CSS = """
     #search-box {
@@ -439,7 +439,7 @@ class RecallApp(App):
             id="search-input",
         )
         yield Label(
-            f"claude-recall v{__version__} | Search by text, or use file: cmd: branch: prefixes",
+            f"claude-code-recall v{__version__} | Search by text, or use file: cmd: branch: prefixes",
             id="status",
         )
         with Horizontal(id="main"):
@@ -448,7 +448,7 @@ class RecallApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.title = f"claude-recall v{__version__}"
+        self.title = f"claude-code-recall v{__version__}"
         if self._results and self.initial_query.strip():
             self._display_results(self._results)
         elif not self.initial_query.strip():
@@ -463,7 +463,7 @@ class RecallApp(App):
 
         if not query:
             status.update(
-                f"claude-recall v{__version__} | Recent sessions  |  Type to search, or use file: cmd: branch:"
+                f"claude-code-recall v{__version__} | Recent sessions  |  Type to search, or use file: cmd: branch:"
             )
             self._selected_result = None
             preview = self.query_one("#preview", PreviewPanel)
@@ -553,8 +553,8 @@ class RecallApp(App):
     @work(exclusive=True, thread=True)
     def _load_recent(self) -> None:
         """Load recent sessions for the empty-query browse state."""
-        from claude_recall.config import load_config
-        from claude_recall.searcher import recent_sessions
+        from claude_code_recall.config import load_config
+        from claude_code_recall.searcher import recent_sessions
 
         limit = load_config().get("limit", 20)
         kwargs = {"limit": limit}
@@ -572,8 +572,8 @@ class RecallApp(App):
         time.sleep(0.5)
 
         if not query.strip():
-            from claude_recall.config import load_config
-            from claude_recall.searcher import recent_sessions
+            from claude_code_recall.config import load_config
+            from claude_code_recall.searcher import recent_sessions
 
             limit = load_config().get("limit", 20)
             kwargs = {"limit": limit}
@@ -589,8 +589,8 @@ class RecallApp(App):
         if current != query.strip():
             return  # User kept typing — skip this search, next one will run
 
-        from claude_recall.config import load_config
-        from claude_recall.searcher import search as do_search
+        from claude_code_recall.config import load_config
+        from claude_code_recall.searcher import search as do_search
 
         limit = load_config().get("limit", 20)
         search_kwargs = {"query": query, "limit": limit}
@@ -648,7 +648,7 @@ class RecallApp(App):
     @work(thread=True, group="auto-summary")
     def _auto_summarize(self, result: SearchResult) -> None:
         """Auto-load AI summary in background when a result is highlighted."""
-        from claude_recall.config import load_config
+        from claude_code_recall.config import load_config
 
         if not load_config().get("auto_ai_summary", True):
             return

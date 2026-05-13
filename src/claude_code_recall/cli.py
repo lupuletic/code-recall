@@ -1,4 +1,4 @@
-"""CLI interface for claude-recall."""
+"""CLI interface for claude-code-recall."""
 
 from __future__ import annotations
 
@@ -7,13 +7,21 @@ import json
 import sys
 from pathlib import Path
 
-from claude_recall import __version__
-from claude_recall.db import DB_PATH, get_connection, get_stats
-from claude_recall.indexer import build_index, ensure_index
-from claude_recall.searcher import search
-from claude_recall.utils import PROJECTS_DIR, clean_display_text, format_date, format_size
+from claude_code_recall import __version__
+from claude_code_recall.db import DB_PATH, get_connection, get_stats
+from claude_code_recall.indexer import build_index, ensure_index
+from claude_code_recall.searcher import search
+from claude_code_recall.utils import (
+    PROJECTS_DIR,
+    app_data_dir,
+    clean_display_text,
+    format_date,
+    format_size,
+)
 
-HOOKS_MARKER = Path.home() / ".claude-recall" / ".hooks-installed"
+COMMAND_NAME = "claude-code-recall"
+LEGACY_COMMAND_NAME = "claude-recall"
+HOOKS_MARKER = app_data_dir() / ".hooks-installed"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -26,7 +34,7 @@ def main(argv: list[str] | None = None) -> None:
 
 def _run(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="claude-recall",
+        prog="claude-code-recall",
         description="Semantic search across Claude Code sessions.",
         usage="%(prog)s [query ...] [options]\n       %(prog)s <command> [options]",
     )
@@ -57,12 +65,12 @@ def _run(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     # Setup logging
-    from claude_recall.logger import enable_verbose, get_logger
+    from claude_code_recall.logger import enable_verbose, get_logger
 
     log = get_logger()
     if getattr(args, "verbose", False):
         enable_verbose(log)
-    log.debug(f"claude-recall started, args={vars(args)}")
+    log.debug(f"claude-code-recall started, args={vars(args)}")
 
     # Route to subcommands if the first positional arg is a known command
     command = args.query[0] if args.query else None
@@ -88,7 +96,7 @@ def _run(argv: list[str] | None = None) -> None:
         _cmd_search(args)
 
     # Non-blocking update check (once per day)
-    from claude_recall.updater import check_for_update
+    from claude_code_recall.updater import check_for_update
 
     check_for_update(quiet=args.quiet or args.json_output or command == "update")
 
@@ -99,7 +107,7 @@ def _first_run_setup(args: argparse.Namespace) -> None:
     show_output = not args.quiet and not args.json_output
 
     if is_first_run and show_output:
-        print("Welcome to claude-recall! Setting up...\n", file=sys.stderr)
+        print("Welcome to claude-code-recall! Setting up...\n", file=sys.stderr)
 
     # Auto-index (silent on subsequent runs — takes <1s)
     ensure_index(args.claude_dir, args.db, verbose=is_first_run and show_output)
@@ -111,7 +119,7 @@ def _first_run_setup(args: argparse.Namespace) -> None:
 
 def _auto_install_hooks() -> None:
     """Silently install SessionEnd hooks on first run."""
-    from claude_recall.config import load_config
+    from claude_code_recall.config import load_config
 
     if not load_config().get("auto_index_hook", True):
         return
@@ -119,11 +127,11 @@ def _auto_install_hooks() -> None:
     import shutil
 
     settings_path = Path.home() / ".claude" / "settings.json"
-    claude_recall_bin = shutil.which("claude-recall")
-    if not claude_recall_bin:
+    claude_code_recall_bin = shutil.which(COMMAND_NAME)
+    if not claude_code_recall_bin:
         return
 
-    hook_command = f"{claude_recall_bin} index --quiet"
+    hook_command = f"{claude_code_recall_bin} index --quiet"
     desired_hook = _index_hook_config(hook_command)
 
     settings = {}
@@ -140,7 +148,7 @@ def _auto_install_hooks() -> None:
     # Don't install if already present
     for rule in session_end_hooks:
         for hook in rule.get("hooks", []):
-            if "claude-recall" in hook.get("command", ""):
+            if _hook_mentions_app(hook.get("command", "")):
                 hook.update(desired_hook)
                 try:
                     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +183,7 @@ def _auto_install_hooks() -> None:
 
 def _cmd_config(args: argparse.Namespace) -> None:
     """View or set config values."""
-    from claude_recall.config import print_config, set_value
+    from claude_code_recall.config import print_config, set_value
 
     config_args = args.query[1:]  # strip "config"
     if len(config_args) >= 2:
@@ -191,7 +199,7 @@ def _cmd_config(args: argparse.Namespace) -> None:
 
 def _cmd_update(args: argparse.Namespace) -> None:
     """Check for and optionally install the latest release."""
-    from claude_recall.updater import run_update
+    from claude_code_recall.updater import run_update
 
     code = run_update(yes=args.yes, quiet=args.quiet)
     if code:
@@ -199,7 +207,7 @@ def _cmd_update(args: argparse.Namespace) -> None:
 
 
 def _cmd_search(args: argparse.Namespace) -> None:
-    from claude_recall.config import load_config
+    from claude_code_recall.config import load_config
 
     config = load_config()
     query = " ".join(args.query)
@@ -223,7 +231,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
     # No query + interactive terminal → open TUI for browsing
     if not query and sys.stdout.isatty():
         try:
-            from claude_recall.tui import run_tui
+            from claude_code_recall.tui import run_tui
 
             run_tui("", [], db_path=args.db)
             return
@@ -231,8 +239,8 @@ def _cmd_search(args: argparse.Namespace) -> None:
             pass
 
     if not query:
-        print("Usage: claude-recall <query>", file=sys.stderr)
-        print('  Example: claude-recall "debugging auth middleware"', file=sys.stderr)
+        print("Usage: claude-code-recall <query>", file=sys.stderr)
+        print('  Example: claude-code-recall "debugging auth middleware"', file=sys.stderr)
         sys.exit(1)
 
     results = search(
@@ -253,7 +261,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
     # TUI if available and not disabled
     if not args.no_tui and sys.stdout.isatty():
         try:
-            from claude_recall.tui import run_tui
+            from claude_code_recall.tui import run_tui
 
             run_tui(query, results, db_path=args.db)
             return
@@ -337,7 +345,7 @@ def _cmd_index(args: argparse.Namespace) -> None:
 
     # Pre-download models during explicit index (not during search)
     try:
-        from claude_recall.embedder import ensure_models_downloaded
+        from claude_code_recall.embedder import ensure_models_downloaded
         ensure_models_downloaded()
     except Exception:
         pass
@@ -359,7 +367,7 @@ def _cmd_index(args: argparse.Namespace) -> None:
 
 def _cmd_info(args: argparse.Namespace) -> None:
     if not args.db.exists():
-        print("No index found. Run 'claude-recall' to build it.")
+        print("No index found. Run 'claude-code-recall' to build it.")
         return
 
     conn = get_connection(args.db)
@@ -377,7 +385,7 @@ def _cmd_info(args: argparse.Namespace) -> None:
 
     conn.close()
 
-    print(f"claude-recall v{__version__}")
+    print(f"claude-code-recall v{__version__}")
     print(f"  Database: {args.db}")
     print(f"  Size: {format_size(args.db.stat().st_size)}")
     print(
@@ -395,10 +403,10 @@ def _cmd_info(args: argparse.Namespace) -> None:
         f"{format_date(stats.get('latest'))}"
     )
 
-    from claude_recall import has_semantic, has_tui
+    from claude_code_recall import has_semantic, has_tui
 
-    sem = "enabled" if has_semantic() else "not installed (pip install claude-recall[semantic])"
-    tui = "enabled" if has_tui() else "not installed (pip install claude-recall[tui])"
+    sem = "enabled" if has_semantic() else "not installed (pip install claude-code-recall[semantic])"
+    tui = "enabled" if has_tui() else "not installed (pip install claude-code-recall[tui])"
     print(f"  Semantic: {sem}")
     print(f"  TUI: {tui}")
 
@@ -409,7 +417,7 @@ def _cmd_gc(args: argparse.Namespace) -> None:
         print("No index found.")
         return
 
-    from claude_recall.db import delete_session
+    from claude_code_recall.db import delete_session
 
     conn = get_connection(args.db)
     rows = conn.execute("SELECT session_id, file_path FROM sessions").fetchall()
@@ -430,13 +438,13 @@ def _cmd_install_hooks() -> None:
     import shutil
 
     settings_path = Path.home() / ".claude" / "settings.json"
-    claude_recall_bin = shutil.which("claude-recall")
+    claude_code_recall_bin = shutil.which(COMMAND_NAME)
 
-    if not claude_recall_bin:
-        print("Warning: 'claude-recall' not found in PATH.")
-        claude_recall_bin = "claude-recall"
+    if not claude_code_recall_bin:
+        print(f"Warning: '{COMMAND_NAME}' not found in PATH.")
+        claude_code_recall_bin = COMMAND_NAME
 
-    hook_command = f"{claude_recall_bin} index --quiet"
+    hook_command = f"{claude_code_recall_bin} index --quiet"
     desired_hook = _index_hook_config(hook_command)
 
     settings = {}
@@ -452,7 +460,7 @@ def _cmd_install_hooks() -> None:
 
     for rule in session_end_hooks:
         for hook in rule.get("hooks", []):
-            if "claude-recall" in hook.get("command", ""):
+            if _hook_mentions_app(hook.get("command", "")):
                 hook.update(desired_hook)
                 settings_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(settings_path, "w") as f:
@@ -490,6 +498,10 @@ def _index_hook_config(command: str) -> dict:
         "timeout": 30,
         "async": True,
     }
+
+
+def _hook_mentions_app(command: str) -> bool:
+    return COMMAND_NAME in command or LEGACY_COMMAND_NAME in command
 
 
 if __name__ == "__main__":

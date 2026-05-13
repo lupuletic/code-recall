@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from claude_recall.db import DB_PATH
+from claude_code_recall.db import DB_PATH
 
 
 pytestmark = pytest.mark.skipif(
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
 
 def _search_finds(query: str, expected_project: str, limit: int = 3) -> bool:
     """Check if the top search result matches the expected project."""
-    from claude_recall.searcher import search
+    from claude_code_recall.searcher import search
 
     results = search(query, limit=limit)
     if not results:
@@ -36,7 +36,7 @@ def _search_finds(query: str, expected_project: str, limit: int = 3) -> bool:
 
 def _search_finds_in_top(query: str, expected_project: str, top_n: int = 3) -> bool:
     """Check if the expected project appears anywhere in the top N results."""
-    from claude_recall.searcher import search
+    from claude_code_recall.searcher import search
 
     results = search(query, limit=top_n)
     return any(

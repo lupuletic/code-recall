@@ -1,4 +1,4 @@
-"""Session indexer for claude-recall."""
+"""Session indexer for claude-code-recall."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import sys
 import time
 from pathlib import Path
 
-from claude_recall import has_semantic
-from claude_recall.db import (
+from claude_code_recall import has_semantic
+from claude_code_recall.db import (
     DB_PATH,
     build_session_chains,
     delete_session,
@@ -21,8 +21,8 @@ from claude_recall.db import (
     upsert_session_commands,
     upsert_session_files,
 )
-from claude_recall.models import Session
-from claude_recall.utils import (
+from claude_code_recall.models import Session
+from claude_code_recall.utils import (
     PROJECTS_DIR,
     decode_project_path,
     discover_sessions,
@@ -290,12 +290,12 @@ def _spawn_background_embeddings(db_path: Path, projects_dir: Path, verbose: boo
             file=sys.stderr,
         )
 
-    # Run `claude-recall index --quiet` in background, preserving custom paths
+    # Run `claude-code-recall index --quiet` in background, preserving custom paths
     import shutil
 
-    claude_recall_bin = shutil.which("claude-recall")
-    base_cmd = [claude_recall_bin, "index", "--quiet"] if claude_recall_bin else \
-               [sys.executable, "-m", "claude_recall", "index", "--quiet"]
+    claude_code_recall_bin = shutil.which("claude-code-recall")
+    base_cmd = [claude_code_recall_bin, "index", "--quiet"] if claude_code_recall_bin else \
+               [sys.executable, "-m", "claude_code_recall", "index", "--quiet"]
 
     # Pass custom paths so the background process uses the same DB/source
     if db_path != DB_PATH:
@@ -379,7 +379,7 @@ def _generate_embeddings(
 ) -> int:
     """Generate embeddings for sessions that don't have them yet."""
     try:
-        from claude_recall.embedder import get_embedder
+        from claude_code_recall.embedder import get_embedder
     except ImportError:
         return 0
 
@@ -387,7 +387,7 @@ def _generate_embeddings(
     if embedder is None:
         return 0
 
-    from claude_recall.db import load_vec_extension
+    from claude_code_recall.db import load_vec_extension
 
     load_vec_extension(conn)
 

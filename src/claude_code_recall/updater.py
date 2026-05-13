@@ -1,4 +1,4 @@
-"""Auto-update check for claude-recall."""
+"""Auto-update check for claude-code-recall."""
 
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ import time
 from pathlib import Path
 from urllib.request import urlopen
 
-from claude_recall import __version__
+from claude_code_recall import __version__
+from claude_code_recall.utils import app_data_dir
 
-UPDATE_CHECK_FILE = Path.home() / ".claude-recall" / ".last-update-check"
+UPDATE_CHECK_FILE = app_data_dir() / ".last-update-check"
 CHECK_INTERVAL = 86400  # 24 hours
-PYPI_JSON_URL = "https://pypi.org/pypi/claude-recall/json"
+PACKAGE_NAME = "claude-code-recall"
+LEGACY_PACKAGE_NAME = "claude-recall"
+PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 
 
 def get_latest_version(timeout: float = 2) -> str | None:
@@ -34,7 +37,7 @@ def check_for_update(quiet: bool = False) -> None:
     if quiet:
         return
 
-    from claude_recall.config import load_config
+    from claude_code_recall.config import load_config
 
     if not load_config().get("update_check", True):
         return
@@ -75,14 +78,26 @@ class UpdateCommand:
 
 def detect_update_command() -> UpdateCommand:
     """Return the best upgrade command for the user's install method."""
-    if _uv_tool_installed():
-        return UpdateCommand(["uv", "tool", "upgrade", "claude-recall"], "uv tool")
+    uv_package = _uv_tool_package()
+    if uv_package == PACKAGE_NAME:
+        return UpdateCommand(["uv", "tool", "upgrade", PACKAGE_NAME], "uv tool")
+    if uv_package == LEGACY_PACKAGE_NAME:
+        return UpdateCommand(
+            [
+                "uv", "tool", "install", "--force", PACKAGE_NAME,
+                "--with", "textual", "--with", "fastembed", "--with", "sqlite-vec",
+            ],
+            "uv tool",
+        )
 
-    if _pipx_installed():
-        return UpdateCommand(["pipx", "upgrade", "claude-recall"], "pipx")
+    pipx_package = _pipx_package()
+    if pipx_package == PACKAGE_NAME:
+        return UpdateCommand(["pipx", "upgrade", PACKAGE_NAME], "pipx")
+    if pipx_package == LEGACY_PACKAGE_NAME:
+        return UpdateCommand(["pipx", "install", "--force", f"{PACKAGE_NAME}[all]"], "pipx")
 
     return UpdateCommand(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "claude-recall[all]"],
+        [sys.executable, "-m", "pip", "install", "--upgrade", f"{PACKAGE_NAME}[all]"],
         "pip",
     )
 
@@ -96,12 +111,12 @@ def run_update(yes: bool = False, quiet: bool = False) -> int:
     """Check for and optionally install the latest release."""
     latest = get_latest_version(timeout=10)
     if not latest:
-        print("Could not check PyPI for the latest claude-recall version.", file=sys.stderr)
+        print("Could not check PyPI for the latest claude-code-recall version.", file=sys.stderr)
         return 1
 
     if not _is_newer(latest, __version__):
         if not quiet:
-            print(f"claude-recall is already up to date ({__version__}).")
+            print(f"claude-code-recall is already up to date ({__version__}).")
         return 0
 
     update_command = detect_update_command()
@@ -120,9 +135,9 @@ def run_update(yes: bool = False, quiet: bool = False) -> int:
     return subprocess.run(update_command.command).returncode
 
 
-def _uv_tool_installed() -> bool:
+def _uv_tool_package() -> str | None:
     if not shutil.which("uv"):
-        return False
+        return None
     try:
         result = subprocess.run(
             ["uv", "tool", "list"],
@@ -132,13 +147,19 @@ def _uv_tool_installed() -> bool:
             check=False,
         )
     except Exception:
-        return False
-    return result.returncode == 0 and "claude-recall" in result.stdout
+        return None
+    if result.returncode != 0:
+        return None
+    if PACKAGE_NAME in result.stdout:
+        return PACKAGE_NAME
+    if LEGACY_PACKAGE_NAME in result.stdout:
+        return LEGACY_PACKAGE_NAME
+    return None
 
 
-def _pipx_installed() -> bool:
+def _pipx_package() -> str | None:
     if not shutil.which("pipx"):
-        return False
+        return None
 
     try:
         result = subprocess.run(
@@ -151,8 +172,11 @@ def _pipx_installed() -> bool:
         if result.returncode == 0:
             data = json.loads(result.stdout or "{}")
             packages = data.get("venvs", {})
-            if isinstance(packages, dict) and "claude-recall" in packages:
-                return True
+            if isinstance(packages, dict):
+                if PACKAGE_NAME in packages:
+                    return PACKAGE_NAME
+                if LEGACY_PACKAGE_NAME in packages:
+                    return LEGACY_PACKAGE_NAME
     except Exception:
         pass
 
@@ -165,8 +189,14 @@ def _pipx_installed() -> bool:
             check=False,
         )
     except Exception:
-        return False
-    return result.returncode == 0 and "claude-recall" in result.stdout
+        return None
+    if result.returncode != 0:
+        return None
+    if PACKAGE_NAME in result.stdout:
+        return PACKAGE_NAME
+    if LEGACY_PACKAGE_NAME in result.stdout:
+        return LEGACY_PACKAGE_NAME
+    return None
 
 
 def _is_newer(latest: str, current: str) -> bool:

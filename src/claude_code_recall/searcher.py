@@ -1,4 +1,4 @@
-"""Search engine for claude-recall."""
+"""Search engine for claude-code-recall."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import math
 import sqlite3
 from pathlib import Path
 
-from claude_recall.db import DB_PATH, get_connection, get_related_sessions, has_vec_table
-from claude_recall.models import SearchResult, Session
+from claude_code_recall.db import DB_PATH, get_connection, get_related_sessions, has_vec_table
+from claude_code_recall.models import SearchResult, Session
 
 
 def _should_show_subagents() -> bool:
     """Check config to determine if subagent sessions should be shown."""
-    from claude_recall.config import load_config
+    from claude_code_recall.config import load_config
 
     return load_config().get("show_subagents", False)
 
@@ -62,7 +62,7 @@ def search(
     if not query or not query.strip():
         return []
 
-    from claude_recall.logger import Timer, get_logger
+    from claude_code_recall.logger import Timer, get_logger
 
     log = get_logger()
     log.debug(f"search: query='{query}' limit={limit} project={project_filter} semantic={semantic}")
@@ -140,7 +140,7 @@ def _search_pipeline(
     conn, query, limit, project_filter, after, before, semantic, min_messages,
 ) -> list[SearchResult]:
     """Core search pipeline. Connection managed by caller."""
-    from claude_recall.logger import Timer, get_logger
+    from claude_code_recall.logger import Timer, get_logger
 
     log = get_logger()
 
@@ -180,7 +180,7 @@ def _search_pipeline(
     use_semantic = semantic if semantic is not None else has_vec_table(conn)
     if use_semantic:
         try:
-            from claude_recall.embedder import get_embedder
+            from claude_code_recall.embedder import get_embedder
 
             if get_embedder() is None:
                 use_semantic = False
@@ -290,7 +290,7 @@ def _search_pipeline(
         combined = _cross_encoder_rerank(query, combined[:limit * 2])
 
     # Phase 6: LLM reranking — only when explicitly set to "llm" mode
-    from claude_recall.config import load_config
+    from claude_code_recall.config import load_config
 
     config = load_config()
     if config.get("search_mode") == "llm" and combined:
@@ -582,8 +582,8 @@ def _vec_search(
 ) -> list[SearchResult]:
     """Vector similarity search using sqlite-vec."""
     try:
-        from claude_recall.db import load_vec_extension
-        from claude_recall.embedder import get_embedder
+        from claude_code_recall.db import load_vec_extension
+        from claude_code_recall.embedder import get_embedder
 
         if not load_vec_extension(conn):
             return []
@@ -1129,7 +1129,7 @@ def _cross_encoder_rerank(query: str, results: list[SearchResult]) -> list[Searc
         return results
 
     try:
-        from claude_recall.embedder import get_reranker
+        from claude_code_recall.embedder import get_reranker
 
         reranker = get_reranker()
         if reranker is None:
@@ -1193,7 +1193,7 @@ def _cross_encoder_rerank(query: str, results: list[SearchResult]) -> list[Searc
     # Drop results that are clearly irrelevant compared to the top result
     # BUT keep results from the same project (they're likely related sessions)
     if len(reranked) >= 2 and reranked[0].score > 0.5:
-        from claude_recall.config import load_config
+        from claude_code_recall.config import load_config
 
         cutoff_pct = load_config().get("relevance_cutoff", 0.4)
         top_project = reranked[0].session.project_dir
@@ -1215,7 +1215,7 @@ def _llm_rerank(query: str, results: list[SearchResult]) -> list[SearchResult]:
 
     print("  Reranking with Claude...", end="", file=sys.stderr, flush=True)
 
-    from claude_recall.llm_reranker import llm_rerank
+    from claude_code_recall.llm_reranker import llm_rerank
 
     candidates = []
     for r in results:

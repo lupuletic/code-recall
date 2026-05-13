@@ -1,4 +1,4 @@
-"""Tests for claude_recall.db."""
+"""Tests for claude_code_recall.db."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_recall.db import (
+from claude_code_recall.db import (
     build_session_chains,
     delete_session,
     get_all_session_ids,
@@ -21,7 +21,7 @@ from claude_recall.db import (
     upsert_session_commands,
     upsert_session_files,
 )
-from claude_recall.models import Session
+from claude_code_recall.models import Session
 
 
 # ===========================================================================

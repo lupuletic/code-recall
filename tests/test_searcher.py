@@ -1,4 +1,4 @@
-"""Tests for claude_recall.searcher."""
+"""Tests for claude_code_recall.searcher."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_recall.db import (
+from claude_code_recall.db import (
     get_connection,
     upsert_chunks,
     upsert_graph_edges,
@@ -15,8 +15,8 @@ from claude_recall.db import (
     upsert_session_commands,
     upsert_session_files,
 )
-from claude_recall.models import SearchResult, Session
-from claude_recall.searcher import (
+from claude_code_recall.models import SearchResult, Session
+from claude_code_recall.searcher import (
     _apply_depth_boost,
     _apply_prompt_match_boost,
     _branch_search,
@@ -455,7 +455,7 @@ class TestCrossEncoderRerank:
         result = _cross_encoder_rerank("hello", [r])
         assert len(result) == 1
 
-    @patch("claude_recall.embedder.get_reranker")
+    @patch("claude_code_recall.embedder.get_reranker")
     def test_reranker_reorders(self, mock_get_reranker):
         """Mock reranker should reorder results."""
         mock_reranker = MagicMock()
@@ -473,7 +473,7 @@ class TestCrossEncoderRerank:
         assert len(result) >= 1
         assert result[0].session.session_id == "b"
 
-    @patch("claude_recall.embedder.get_reranker")
+    @patch("claude_code_recall.embedder.get_reranker")
     def test_relevance_cutoff(self, mock_get_reranker):
         """Low-scoring results should be dropped if top score is strong."""
         mock_reranker = MagicMock()
@@ -495,7 +495,7 @@ class TestCrossEncoderRerank:
         assert "strong" in ids
         assert "weak" not in ids
 
-    @patch("claude_recall.embedder.get_reranker", return_value=None)
+    @patch("claude_code_recall.embedder.get_reranker", return_value=None)
     def test_no_reranker_returns_unchanged(self, mock_get_reranker):
         """If reranker is not available, return results unchanged."""
         r0 = self._make_result("a", "hello")
@@ -504,7 +504,7 @@ class TestCrossEncoderRerank:
         assert len(result) == 2
         assert result[0].session.session_id == "a"
 
-    @patch("claude_recall.embedder.get_reranker")
+    @patch("claude_code_recall.embedder.get_reranker")
     def test_reranker_exception_returns_unchanged(self, mock_get_reranker):
         """If reranker raises, return results unchanged."""
         mock_reranker = MagicMock()
@@ -910,7 +910,7 @@ class TestStructuredSearch:
 class TestBranchDetection:
     def test_git_checkout_b_detects_branch(self):
         """git checkout -b feature should detect 'feature', not '-b'."""
-        from claude_recall.utils import parse_session_file
+        from claude_code_recall.utils import parse_session_file
         import json
         import tempfile
         import os
@@ -938,7 +938,7 @@ class TestBranchDetection:
 
     def test_git_switch_c_detects_branch(self):
         """git switch -c feature should detect 'feature', not '-c'."""
-        from claude_recall.utils import parse_session_file
+        from claude_code_recall.utils import parse_session_file
         import json
         import tempfile
         import os
@@ -966,7 +966,7 @@ class TestBranchDetection:
 
     def test_git_checkout_plain_detects_branch(self):
         """git checkout main should detect 'main'."""
-        from claude_recall.utils import parse_session_file
+        from claude_code_recall.utils import parse_session_file
         import json
         import tempfile
         import os

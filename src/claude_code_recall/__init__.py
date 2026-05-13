@@ -1,6 +1,6 @@
-"""claude-recall: Semantic search across Claude Code sessions."""
+"""claude-code-recall: Semantic search across Claude Code sessions."""
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 
 def has_semantic() -> bool:

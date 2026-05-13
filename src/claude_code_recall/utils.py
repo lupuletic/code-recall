@@ -9,6 +9,23 @@ from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
+APP_DIR_NAME = ".claude-code-recall"
+LEGACY_APP_DIR_NAME = ".claude-recall"
+
+
+def app_data_dir() -> Path:
+    """Return the app data directory, migrating the old name when possible."""
+    app_dir = Path.home() / APP_DIR_NAME
+    legacy_dir = Path.home() / LEGACY_APP_DIR_NAME
+    if app_dir.exists():
+        return app_dir
+    if legacy_dir.exists():
+        try:
+            legacy_dir.rename(app_dir)
+            return app_dir
+        except OSError:
+            return legacy_dir
+    return app_dir
 
 # Max chars to keep for indexed text fields
 MAX_FIRST_PROMPT = 500

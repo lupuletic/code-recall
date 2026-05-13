@@ -1,4 +1,4 @@
-"""Tests for claude_recall.utils."""
+"""Tests for claude_code_recall.utils."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_recall.utils import (
+from claude_code_recall.utils import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     MAX_CHUNK_CHARS,

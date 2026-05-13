@@ -1,11 +1,12 @@
-"""Configuration for claude-recall."""
+"""Configuration for claude-code-recall."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".claude-recall" / "config.json"
+from claude_code_recall.utils import app_data_dir
+
+CONFIG_PATH = app_data_dir() / "config.json"
 
 DEFAULTS = {
     "search_mode": "hybrid",
@@ -82,9 +83,9 @@ def print_config() -> None:
     """Print current config with descriptions."""
     config = load_config()
 
-    from claude_recall import has_semantic
+    from claude_code_recall import has_semantic
 
-    print("claude-recall settings")
+    print("claude-code-recall settings")
     print(f"  Config: {CONFIG_PATH}\n")
 
     for key, value in config.items():
@@ -95,9 +96,9 @@ def print_config() -> None:
             print(f"  {key}: {value}{marker}")
             print(f"    {desc}")
             if value in ("semantic", "hybrid", "reranked") and not has_semantic():
-                print(f"    ⚠ Requires: pip install claude-recall[semantic]")
+                print(f"    ⚠ Requires: pip install claude-code-recall[semantic]")
         else:
             print(f"  {key}: {value}{marker}")
 
-    print(f"\nSet with: claude-recall config <key> <value>")
+    print(f"\nSet with: claude-code-recall config <key> <value>")
     print(f"Modes: {', '.join(SEARCH_MODES)}")
