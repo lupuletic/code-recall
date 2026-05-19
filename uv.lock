@@ -172,6 +172,7 @@ all = [
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 semantic = [
     { name = "fastembed" },
@@ -189,6 +190,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "sqlite-vec", marker = "extra == 'semantic'", specifier = ">=0.1" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=1.0" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0" },
 ]
 provides-extras = ["semantic", "tui", "all", "dev"]
 

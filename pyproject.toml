@@ -32,7 +32,7 @@ code-recall = "code_recall.cli:main"
 semantic = ["fastembed>=0.4", "sqlite-vec>=0.1"]
 tui = ["textual>=1.0"]
 all = ["code-recall[semantic,tui]"]
-dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "tomli>=2.0; python_version < '3.11'"]
 
 [project.urls]
 Homepage = "https://github.com/lupuletic/code-recall"
