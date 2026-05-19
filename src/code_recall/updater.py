@@ -1,4 +1,4 @@
-"""Auto-update check for claude-code-recall."""
+"""Auto-update check for code-recall."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ import time
 from pathlib import Path
 from urllib.request import urlopen
 
-from claude_code_recall import __version__
-from claude_code_recall.utils import app_data_dir
+from code_recall import __version__
+from code_recall.utils import app_data_dir
 
 UPDATE_CHECK_FILE = app_data_dir() / ".last-update-check"
 CHECK_INTERVAL = 86400  # 24 hours
-PACKAGE_NAME = "claude-code-recall"
-LEGACY_PACKAGE_NAME = "claude-recall"
+PACKAGE_NAME = "code-recall"
+LEGACY_PACKAGE_NAMES = ("claude-code-recall", "claude-recall")
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 
 
@@ -37,7 +37,7 @@ def check_for_update(quiet: bool = False) -> None:
     if quiet:
         return
 
-    from claude_code_recall.config import load_config
+    from code_recall.config import load_config
 
     if not load_config().get("update_check", True):
         return
@@ -81,7 +81,7 @@ def detect_update_command() -> UpdateCommand:
     uv_package = _uv_tool_package()
     if uv_package == PACKAGE_NAME:
         return UpdateCommand(["uv", "tool", "upgrade", PACKAGE_NAME], "uv tool")
-    if uv_package == LEGACY_PACKAGE_NAME:
+    if uv_package in LEGACY_PACKAGE_NAMES:
         return UpdateCommand(
             [
                 "uv", "tool", "install", "--force", PACKAGE_NAME,
@@ -93,7 +93,7 @@ def detect_update_command() -> UpdateCommand:
     pipx_package = _pipx_package()
     if pipx_package == PACKAGE_NAME:
         return UpdateCommand(["pipx", "upgrade", PACKAGE_NAME], "pipx")
-    if pipx_package == LEGACY_PACKAGE_NAME:
+    if pipx_package in LEGACY_PACKAGE_NAMES:
         return UpdateCommand(["pipx", "install", "--force", f"{PACKAGE_NAME}[all]"], "pipx")
 
     return UpdateCommand(
@@ -111,12 +111,12 @@ def run_update(yes: bool = False, quiet: bool = False) -> int:
     """Check for and optionally install the latest release."""
     latest = get_latest_version(timeout=10)
     if not latest:
-        print("Could not check PyPI for the latest claude-code-recall version.", file=sys.stderr)
+        print("Could not check PyPI for the latest code-recall version.", file=sys.stderr)
         return 1
 
     if not _is_newer(latest, __version__):
         if not quiet:
-            print(f"claude-code-recall is already up to date ({__version__}).")
+            print(f"code-recall is already up to date ({__version__}).")
         return 0
 
     update_command = detect_update_command()
@@ -150,10 +150,12 @@ def _uv_tool_package() -> str | None:
         return None
     if result.returncode != 0:
         return None
-    if PACKAGE_NAME in result.stdout:
+    packages = _listed_packages(result.stdout)
+    if PACKAGE_NAME in packages:
         return PACKAGE_NAME
-    if LEGACY_PACKAGE_NAME in result.stdout:
-        return LEGACY_PACKAGE_NAME
+    for legacy_name in LEGACY_PACKAGE_NAMES:
+        if legacy_name in packages:
+            return legacy_name
     return None
 
 
@@ -175,8 +177,9 @@ def _pipx_package() -> str | None:
             if isinstance(packages, dict):
                 if PACKAGE_NAME in packages:
                     return PACKAGE_NAME
-                if LEGACY_PACKAGE_NAME in packages:
-                    return LEGACY_PACKAGE_NAME
+                for legacy_name in LEGACY_PACKAGE_NAMES:
+                    if legacy_name in packages:
+                        return legacy_name
     except Exception:
         pass
 
@@ -192,11 +195,23 @@ def _pipx_package() -> str | None:
         return None
     if result.returncode != 0:
         return None
-    if PACKAGE_NAME in result.stdout:
+    packages = _listed_packages(result.stdout)
+    if PACKAGE_NAME in packages:
         return PACKAGE_NAME
-    if LEGACY_PACKAGE_NAME in result.stdout:
-        return LEGACY_PACKAGE_NAME
+    for legacy_name in LEGACY_PACKAGE_NAMES:
+        if legacy_name in packages:
+            return legacy_name
     return None
+
+
+def _listed_packages(output: str) -> set[str]:
+    """Extract package names from text package-manager listings."""
+    packages = set()
+    for line in output.splitlines():
+        parts = line.strip().split()
+        if parts:
+            packages.add(parts[0])
+    return packages
 
 
 def _is_newer(latest: str, current: str) -> bool:

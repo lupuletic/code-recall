@@ -1,125 +1,79 @@
 <div align="center">
 
-# claude-code-recall
+# code-recall
 
-**Find any Claude Code session instantly.**
-Semantic search with cross-encoder reranking and a knowledge graph across all your past conversations.
+**Find the coding-agent session you vaguely remember.**
+
+Search, inspect, chat with, and resume your local Claude Code and Codex history from one fast terminal UI.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-302%20passing-34D058.svg)](#development)
-[![Search Accuracy](https://img.shields.io/badge/search%20accuracy-93%25-34D058.svg)](#search-quality)
-[![Sessions](https://img.shields.io/badge/sessions-2%2C003-8B5CF6.svg)](#search-quality)
-[![Knowledge Graph](https://img.shields.io/badge/knowledge%20graph-3%2C124%20edges-F59E0B.svg)](#knowledge-graph)
+[![Tests](https://img.shields.io/badge/tests-331%20passing-34D058.svg)](#development)
+[![Local first](https://img.shields.io/badge/local--first-no%20API%20keys-34D058.svg)](#privacy)
+[![Providers](https://img.shields.io/badge/providers-Claude%20Code%20%2B%20Codex-8B5CF6.svg)](#providers)
 
 </div>
 
----
+<p align="center">
+  <img src="docs/assets/code-recall-search.svg" alt="code-recall TUI showing a sanitized search for Stripe webhook signature work" width="980">
+</p>
 
 ```bash
-pip install 'claude-code-recall[all]'
-claude-code-recall "debugging the auth middleware"
+pip install 'code-recall[all]'
+code-recall "stripe webhook signature"
 ```
 
-## The Problem
+## Why
 
-You accumulate hundreds of Claude Code sessions across dozens of projects. Built-in `/resume` only shows 10 recent sessions with basic name matching. You can't find the session where you debugged that auth issue, optimized the database, or set up CI/CD.
+Coding agents leave behind useful local transcripts, but built-in resume pickers are optimized for recent sessions. After a few weeks, you remember the shape of the work, not the exact title:
 
-**claude-code-recall** indexes all your sessions and searches them with a 6-stage pipeline — keyword matching, semantic embeddings, cross-encoder reranking, and optional LLM-powered understanding. A knowledge graph connects sessions through shared files, branches, and commands so you can trace how work flows across sessions.
+- "the session where we fixed Stripe webhook signatures"
+- "the dashboard query that got slow after adding invoices"
+- "the Docker healthcheck that broke deploys"
+- "the branch where the OAuth callback tests were added"
 
-## How It Works
+**code-recall turns those transcripts into a searchable memory layer.** It indexes Claude Code and Codex sessions, ranks results with keyword search, semantic search, reranking, and graph signals, then lets you jump back into the right project with the right provider command.
 
-```mermaid
-graph LR
-    Q["Your Query"] --> FTS["FTS5 Keyword\n(BM25, weighted)"]
-    Q --> SEM["Semantic Search\n(bge-small, 384d)"]
-    Q --> KG["Knowledge Graph\n(3,124 edges)"]
-    FTS --> RRF["Reciprocal Rank\nFusion"]
-    SEM --> RRF
-    KG --> RRF
-    RRF --> CE["Cross-Encoder\nReranking (18ms)"]
-    CE --> LLM["LLM Reranking\n(claude -p haiku)"]
-    LLM --> R["Ranked\nResults"]
+## What It Does
 
-    style Q fill:#7c3aed,color:#fff,stroke:none
-    style R fill:#059669,color:#fff,stroke:none
-    style FTS fill:#1e40af,color:#fff,stroke:none
-    style SEM fill:#1e40af,color:#fff,stroke:none
-    style KG fill:#1e40af,color:#fff,stroke:none
-    style RRF fill:#b45309,color:#fff,stroke:none
-    style CE fill:#b45309,color:#fff,stroke:none
-    style LLM fill:#b45309,color:#fff,stroke:none
-```
+- Search Claude Code and Codex sessions together.
+- See exactly **why** a session matched your query.
+- Filter and search by provider, project, branch, file, or command.
+- Resume in the original project directory with `claude --resume ...` or `codex resume ...`.
+- Chat with a selected transcript from the TUI.
+- Keep the index fresh with quick incremental indexing and Claude Code session-end hooks.
+- Stay local-first: your SQLite index and transcript reads stay on your machine.
 
-| Stage | What it does | Speed |
-|-------|-------------|-------|
-| **FTS5** | BM25 keyword search across summary, prompts, messages, project path. Weighted columns (summary 5x, project 4x). Stop word filtering, prefix matching. | < 5ms |
-| **Semantic** | Bi-encoder embeddings (bge-small-en-v1.5, ONNX, local). Searches 6,876 conversation chunks via sqlite-vec cosine similarity. Maps subagent matches to parent sessions. | < 20ms |
-| **Knowledge Graph** | 3,124 edges connecting sessions through 603 shared files, commands, and branches. Surfaces related sessions even when text doesn't match. | < 5ms |
-| **RRF Fusion** | Merges keyword + semantic + graph signals via Reciprocal Rank Fusion. Adapts weighting based on how many FTS results were found. | < 1ms |
-| **Cross-Encoder** | ms-marco-MiniLM-L-6-v2 reranks top candidates with full query-document cross-attention. Much more accurate than bi-encoder similarity. | ~18ms |
-| **LLM Rerank** | Enabled via `search_mode = llm`. Pipes candidates through Claude Haiku for intent understanding. | ~8s |
-| **Cutoff** | Drops results below 40% of top score, but keeps same-project results. Mild depth boost for longer sessions. | < 1ms |
+## Screenshots
 
-### The Key Insight: Subagent Content Bubbling
+All screenshots in this README are generated from synthetic demo data using [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py). They do not come from a real work index.
 
-Claude Code spawns subagents for complex tasks. A session about building an iOS app might have 15 subagents doing the actual work. The parent session's first message might just be "let's build this."
+| Search across providers | Understand why it matched | Chat with a transcript |
+|---|---|---|
+| <img src="docs/assets/code-recall-search.svg" alt="Search results with Claude Code and Codex provider badges" width="310"> | <img src="docs/assets/code-recall-why.svg" alt="Why tab showing matched evidence for a result" width="310"> | <img src="docs/assets/code-recall-ai-chat.svg" alt="AI transcript chat for a selected coding-agent session" width="310"> |
 
-**The real keywords live in subagent sessions.** We solve this:
+For a short GIF or product demo, a good sanitized sequence is:
 
-1. **At index time** — Parent sessions are enriched with subagent first prompts
-2. **At search time** — Semantic matches on subagent chunks map back to the parent session
-3. **Orphan subagents** — Projects with no parent JSONL on disk (subagent-only) are auto-promoted so they remain searchable
-
-This is why searching "an app that captures screenshots" finds a session whose first prompt is "let's build automations" — the subagents contain the screenshot-related content.
-
-## Knowledge Graph
-
-Sessions don't exist in isolation. The knowledge graph tracks relationships between sessions based on shared files, commands, and branches — building a web of connections across your entire coding history.
-
-```mermaid
-graph TD
-    subgraph "Knowledge Graph (3,124 edges)"
-        S1["Session A\n'fix auth bug'"] -->|"shared: auth.py"| S2["Session B\n'add OAuth flow'"]
-        S2 -->|"shared: auth.py\nshared: users.py"| S3["Session C\n'user permissions'"]
-        S1 -->|"same branch:\nfeature/auth"| S3
-        S4["Session D\n'CI pipeline'"] -->|"shared: Dockerfile"| S5["Session E\n'deploy script'"]
-    end
-
-    subgraph "Stats"
-        E["3,124 edges"]
-        F["603 unique files"]
-        SC["106 session chains"]
-    end
-
-    style S1 fill:#7c3aed,color:#fff,stroke:none
-    style S2 fill:#7c3aed,color:#fff,stroke:none
-    style S3 fill:#7c3aed,color:#fff,stroke:none
-    style S4 fill:#1e40af,color:#fff,stroke:none
-    style S5 fill:#1e40af,color:#fff,stroke:none
-    style E fill:#b45309,color:#fff,stroke:none
-    style F fill:#b45309,color:#fff,stroke:none
-    style SC fill:#b45309,color:#fff,stroke:none
-```
-
-The knowledge graph powers two features:
-
-- **Related sessions in the preview panel** — When you select a session, the preview panel shows other sessions that touched the same files. No text matching needed; if two sessions both edited `auth.py`, they're related.
-- **Session chains** — Groups of sessions linked by project + branch + time proximity. 106 chains capture multi-session workflows like "started a feature, continued the next day, fixed a bug the day after." Chains give you the full story of a piece of work, not just individual sessions.
+1. Search `stripe webhook signature`.
+2. Highlight the top result and show the provider badge, project, branch, and `why:` line.
+3. Press `2` for the Why tab and show matched evidence.
+4. Press `p` to cycle Claude Code and Codex provider scopes.
+5. Press `4` to show related sessions that touched the same files.
+6. Press `5` and ask: `What changed and what should I verify before resuming?`
 
 ## Install
 
-<details>
-<summary><strong>pip (recommended)</strong></summary>
+<details open>
+<summary><strong>pip</strong></summary>
 
 ```bash
-# Everything
-pip install 'claude-code-recall[all]'
+# Everything: TUI, semantic search, reranking, sqlite-vec
+pip install 'code-recall[all]'
 
-# Or pick what you need
-pip install claude-code-recall                  # keyword search only (zero deps)
-pip install 'claude-code-recall[semantic]'      # + embeddings + reranking
-pip install 'claude-code-recall[tui]'           # + interactive terminal UI
+# Smaller installs
+pip install code-recall                  # keyword search only
+pip install 'code-recall[semantic]'      # + embeddings and reranking
+pip install 'code-recall[tui]'           # + interactive terminal UI
 ```
 </details>
 
@@ -127,7 +81,7 @@ pip install 'claude-code-recall[tui]'           # + interactive terminal UI
 <summary><strong>uv</strong></summary>
 
 ```bash
-uv tool install claude-code-recall --with textual --with fastembed --with sqlite-vec
+uv tool install code-recall --with textual --with fastembed --with sqlite-vec
 ```
 </details>
 
@@ -135,8 +89,8 @@ uv tool install claude-code-recall --with textual --with fastembed --with sqlite
 <summary><strong>From source</strong></summary>
 
 ```bash
-git clone https://github.com/lupuletic/claude-code-recall
-cd claude-code-recall
+git clone https://github.com/lupuletic/code-recall
+cd code-recall
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
@@ -145,210 +99,217 @@ uv pip install -e ".[all]"
 ## Usage
 
 ```bash
-# Interactive TUI — starts with recent sessions; type to search
-claude-code-recall
+# Interactive TUI - starts with recent sessions; type to search
+code-recall
 
 # Direct search
-claude-code-recall "debugging auth middleware"
-claude-code-recall "database migration script"
-claude-code-recall "setting up 2 git accounts"
+code-recall "stripe webhook signature"
+code-recall "slow account dashboard query"
+code-recall "docker healthcheck deploy"
 
-# Structured search prefixes
-claude-code-recall "file:auth.py"              # find sessions that touched a specific file
-claude-code-recall "cmd:docker build"          # find sessions that ran a specific command
-claude-code-recall "branch:feature/oauth"      # find sessions on a specific branch
+# Search graph metadata directly
+code-recall "file:src/webhooks/stripe.ts"
+code-recall "cmd:pnpm test"
+code-recall "branch:fix/stripe-webhook-signature"
 
-# Combine prefixes with regular queries
-claude-code-recall "file:schema.prisma migration"
-claude-code-recall "branch:main deploy"
+# Combine graph prefixes with regular text
+code-recall "file:schema.prisma migration"
+code-recall "branch:main release workflow"
 
-# Filters
-claude-code-recall "optimization" --project myapp
-claude-code-recall "migration" --after 2026-01-01
+# AI investigation over indexed evidence + read-only transcript access
+code-recall ask "where did we fix webhook signature verification?"
+code-recall investigate "summarize sessions related to checkout retries"
+
+# Index controls
+code-recall index                  # indexes Claude Code + Codex by default
+code-recall index --no-codex       # Claude Code only for this run
 
 # Output formats
-claude-code-recall "query" --no-tui      # plain text
-claude-code-recall "query" --json        # JSON for scripting
+code-recall "query" --no-tui       # plain text
+code-recall "query" --json         # JSON for scripting
 
 # Updates
-claude-code-recall update                # show latest version and upgrade command
-claude-code-recall update --yes          # run the detected upgrade command
+code-recall update
+code-recall update --yes
 ```
 
-### Structured Search Prefixes
-
-| Prefix | What it searches | Example |
-|--------|-----------------|---------|
-| `file:` | Sessions that read/wrote a specific file | `file:docker-compose.yml` |
-| `cmd:` | Sessions that ran a specific command | `cmd:pytest` |
-| `branch:` | Sessions on a specific git branch | `branch:feature/auth` |
-
-Prefixes query the knowledge graph directly — no fuzzy matching, just exact lookups against the 603 tracked files, commands, and branches. Combine them with free-text queries for precise filtering.
-
-### TUI Controls
+## TUI Controls
 
 | Key | Action |
 |-----|--------|
-| Type | Search as you type (debounced) |
-| `↓` / `↑` | Navigate between search bar and results |
-| `Enter` | Focus results / Resume selected session |
-| `Ctrl+P` | Toggle preview panel |
-| `Ctrl+O` | Open settings |
-| `Ctrl+W` | Delete last word |
-| `Cmd+⌫` | Clear entire search |
-| `Esc` | Quit |
+| Type or `/` | Focus search and search as you type |
+| `Tab` / `Shift+Tab` | Move between search, results, and detail panes |
+| `Down` / `Up` | Navigate results |
+| `Enter` / `Right` | Focus the detail pane for the selected result |
+| `1`-`5` | Switch detail tabs: Overview, Why, Activity, Related, AI |
+| `p` | Cycle provider scope: all, Claude Code, Codex |
+| `r` | Resume selected session |
+| `c` | Copy selected resume command |
+| `o` | Open the selected project folder |
+| `Ctrl+A` | Ask AI to investigate the current query/results |
+| `Ctrl+K` | Open the command palette |
+| `Ctrl+O` / `f` | Open settings |
+| `?` | Show help |
+| `Esc` | Close detail/help or quit |
 
-With an empty search box, the TUI shows your most recent sessions across all indexed projects. The preview panel shows session details including **related sessions** — other sessions that share files with the selected one, powered by the knowledge graph. This lets you trace work across sessions without searching.
+With an empty search box, the TUI shows your most recent indexed sessions. Results include provider badges, project/branch context, activity, score quality, file/command counts, and a short `why:` line. The detail pane has Overview, Why, Activity, Related, and AI tabs. On narrow terminals, the detail pane opens as a focused view.
 
-When you resume a session, claude-code-recall `cd`s to the original project directory and runs `claude --resume` — you land right back where you left off.
+## Search
 
-### Settings
+The default search mode is `hybrid`.
 
 ```bash
-claude-code-recall config                              # view settings
-claude-code-recall config search_mode hybrid         # keyword + semantic + reranking (default)
-claude-code-recall config search_mode llm              # + Claude LLM reranking (best, ~10s)
-claude-code-recall config search_mode keyword          # FTS only (fastest, no deps)
-claude-code-recall config limit 20                     # more results
+code-recall config search_mode hybrid   # keyword + semantic + reranking
+code-recall config search_mode keyword  # FTS only, fastest, no semantic deps
+code-recall config search_mode llm      # + assistant reranking, slower
+code-recall config limit 20
 ```
 
-Or press `Ctrl+O` in the TUI for a visual settings panel with search mode, limits, and toggles.
+The ranking pipeline combines:
 
-## Search Quality
+| Stage | What it does |
+|-------|--------------|
+| FTS5 keyword search | Fast BM25 search across summaries, prompts, messages, and project paths. |
+| Structured prefixes | Exact graph lookups for `file:`, `cmd:`, and `branch:` queries. |
+| Semantic search | Local embeddings over conversation chunks when semantic extras are installed. |
+| Knowledge graph | Connects sessions through shared files, commands, branches, and project context. |
+| Cross-encoder rerank | Improves top-result precision for hybrid mode. |
+| Optional LLM rerank | Uses an installed Claude Code or Codex CLI when `search_mode = llm`. |
 
-Benchmarked against 50 realistic "vague memory" queries — the kind of thing developers type when they can't remember which session they need:
+Claude Code subagent content is bubbled up to parent sessions during indexing, so work done by delegated agents remains searchable from the main session.
 
-| Category | Score | Description |
-|----------|-------|-------------|
-| Exact project names | **7/7** | "reshot", "skywatcher", "clawdbot", "grey residence" |
-| Describing work done | **8/9** | "fixing bugs on marketing site", "email setup with microsoft 365" |
-| Semantic / conceptual | **6/6** | "iOS app that captures screenshots", "session about telescope electronics" |
-| Technology queries | **6/6** | "docker container issues", "telegram webhook setup" |
-| Last message context | **2/2** | "use godaddy now", "push the latest to remote" |
-| **Overall** | **29/30 (93%)** | **60ms/query average** |
+## Providers
 
-Remaining failures are from sessions whose parent JSONL was never saved to disk (subagent-only projects) — a Claude Code limitation, not a search limitation.
+code-recall currently indexes:
 
-### Index Stats
+| Provider | Source | Resume command |
+|----------|--------|----------------|
+| Claude Code | `~/.claude/projects/*/*.jsonl` | `claude --resume <id>` |
+| Codex | `~/.codex/sessions/**/*.jsonl` and local Codex state | `codex resume <id>` |
 
-| Metric | Count |
-|--------|-------|
-| Sessions indexed | 2,003 |
-| Conversation chunks | 6,876 |
-| Projects | 79 |
-| Knowledge graph edges | 3,124 |
-| Unique files tracked | 603 |
-| Session chains | 106 |
+AI features use the matching assistant when possible: Claude Code sessions prefer `claude -p`, Codex sessions prefer `codex exec`. If the matching CLI is not installed, code-recall falls back to the other supported CLI when available and shows the assistant provider in the AI tab.
+
+## Index Freshness
+
+code-recall keeps the index fresh in two ways:
+
+- Every search/TUI startup runs a quick incremental index over Claude Code and Codex sources before searching.
+- On first run or `code-recall install-hooks`, code-recall installs a Claude Code `SessionEnd` hook that runs `code-recall index --quiet` when Claude Code sessions end.
+
+Codex sessions are indexed on the next incremental index/search run. There is no Codex session-end hook installed today because Codex does not expose the same `SessionEnd` hook surface in this repo's integration path.
+
+## Privacy
+
+code-recall is designed for local developer recall:
+
+- The index is a local SQLite database under your app data directory.
+- Keyword and graph search do not require network calls.
+- Semantic search uses local embeddings.
+- AI investigation and transcript chat are explicit actions, not automatic background calls.
+- README screenshots are synthetic and reproducible from [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py).
 
 ## Architecture
 
 ```mermaid
 graph TD
-    subgraph "Data Source"
-        JSONL["~/.claude/projects/*/*.jsonl"]
+    subgraph "Data Sources"
+        CLAUDE_JSONL["Claude Code JSONL"]
+        CODEX_JSONL["Codex sessions"]
+        CODEX_DB["Codex local state"]
     end
 
     subgraph "Indexer"
-        PARSE["Parse JSONL sessions"]
-        CHUNK["Chunk into 5-turn windows\n(user + assistant)"]
-        ENRICH["Enrich parents with\nsubagent content"]
-        FTS_IDX["FTS5 Index\n(5 weighted columns)"]
-        VEC_IDX["Embedding Index\n(384d cosine, sqlite-vec)"]
-        KG_IDX["Knowledge Graph\n(files, commands, branches)"]
+        PARSE["Parse provider sessions"]
+        CHUNK["Chunk conversations"]
+        ENRICH["Enrich parent sessions"]
+        FTS_IDX["FTS5 keyword index"]
+        VEC_IDX["Local embedding index"]
+        KG_IDX["Knowledge graph"]
     end
 
     subgraph "Search"
-        QUERY["User Query"]
-        PREFIX["Structured Prefix\nParsing (file:, cmd:, branch:)"]
-        PIPELINE["7-Stage Pipeline"]
-        RESULTS["Ranked Results"]
+        QUERY["User query"]
+        PREFIX["file: cmd: branch:"]
+        PIPELINE["Hybrid ranking"]
+        RESULTS["Ranked sessions"]
     end
 
-    JSONL --> PARSE --> CHUNK --> VEC_IDX
+    CLAUDE_JSONL --> PARSE
+    CODEX_JSONL --> PARSE
+    CODEX_DB --> PARSE
+    PARSE --> CHUNK --> VEC_IDX
     PARSE --> ENRICH --> FTS_IDX
     PARSE --> KG_IDX
-    QUERY --> PREFIX --> PIPELINE --> RESULTS
-
-    style JSONL fill:#374151,color:#fff,stroke:none
-    style QUERY fill:#7c3aed,color:#fff,stroke:none
-    style RESULTS fill:#059669,color:#fff,stroke:none
-    style KG_IDX fill:#b45309,color:#fff,stroke:none
-    style PREFIX fill:#7c3aed,color:#fff,stroke:none
+    QUERY --> PREFIX --> PIPELINE
+    FTS_IDX --> PIPELINE
+    VEC_IDX --> PIPELINE
+    KG_IDX --> PIPELINE
+    PIPELINE --> RESULTS
 ```
 
-### Conversation Chunking
+## Search Quality
 
-Sessions are split into sliding windows of 5 user+assistant turn pairs with 1-turn overlap. Both sides are included — assistant responses anchor what was actually discussed. Each chunk is embedded separately (6,591 vectors), and search returns the parent session (parent-child retrieval).
+The project includes an eval runner so you can measure recall against your own local history:
 
-### Why Hybrid Search?
+```bash
+code-recall eval generate ~/.code-recall/eval-cases.json 30
+code-recall eval ~/.code-recall/eval-cases.json
+uv run python scripts/eval_search.py ~/.code-recall/eval-cases.json --json
+```
 
-Embeddings alone miss exact matches. Searching a project name should match instantly — that's a keyword hit. Our hybrid approach:
-- **Keywords** for exact terms, project names, error messages
-- **Embeddings** for conceptual queries ("app that analyses screenshots")
-- **Knowledge graph** for structural queries ("sessions that touched this file")
-- **Cross-encoder** for precise relevance scoring
-- **LLM** for understanding intent behind vague queries
+Example categories worth testing:
 
-## Comparison
-
-| Feature | claude-code-recall | [recall](https://github.com/arjunkmrm/recall) | [search-sessions](https://github.com/sinzin91/search-sessions) | [claude-history](https://github.com/raine/claude-history) |
-|---------|:---:|:---:|:---:|:---:|
-| Keyword search | FTS5 + weighted BM25 | FTS5 + BM25 | ripgrep | Fuzzy |
-| Semantic search | Local embeddings | - | - | - |
-| Cross-encoder rerank | 18ms | - | - | - |
-| LLM reranking | claude -p | - | - | - |
-| Knowledge graph | 3,124 edges | - | - | - |
-| Structured prefixes | file:, cmd:, branch: | - | - | - |
-| Session chains | 106 chains | - | - | - |
-| Related sessions | Via shared files | - | - | - |
-| Subagent bubbling | Yes | - | - | - |
-| Conversation chunking | 5-turn windows | Full text | - | - |
-| Interactive TUI | Textual | - | - | ratatui |
-| Settings UI | Ctrl+O | - | - | - |
-| Auto-index hooks | SessionEnd | - | - | - |
-| cd to project dir | Yes | - | - | - |
-| Search accuracy | **93%** | - | - | - |
-| API keys needed | No | No | No | No |
+| Category | Example query |
+|----------|---------------|
+| Exact project names | `payments api`, `customer portal` |
+| Vague task recall | `the webhook signature bug` |
+| Technology queries | `prisma dashboard query`, `docker healthcheck` |
+| Last-message context | `what was left before release` |
+| Graph queries | `file:src/webhooks/stripe.ts`, `cmd:pnpm test` |
 
 ## First Run
 
-On first run, claude-code-recall:
-1. Builds a keyword index of all sessions (~8 seconds)
-2. Shows results immediately (keyword search works right away)
-3. Generates embeddings in the background (~2-3 minutes)
-4. Builds the knowledge graph (files, commands, branches, session chains)
-5. Auto-installs a SessionEnd hook so future sessions are indexed automatically
+On first run, code-recall:
+
+1. Builds a keyword index of Claude Code and Codex sessions.
+2. Shows results immediately.
+3. Generates embeddings in the background when semantic extras are installed.
+4. Builds graph metadata for files, commands, branches, and session chains.
+5. Installs the Claude Code session-end hook if you choose to enable hooks.
 
 ## Development
 
 ```bash
-git clone https://github.com/lupuletic/claude-code-recall
-cd claude-code-recall
+git clone https://github.com/lupuletic/code-recall
+cd code-recall
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all,dev]"
-python -m pytest tests/ -q     # unit/integration tests
 
-# Optional: benchmark against your own populated Claude Code index
-CLAUDE_RECALL_RUN_QUALITY_TESTS=1 python -m pytest tests/test_search_quality.py -v
+uv run pytest -q
+uv run python scripts/check_version.py
+uv run python -m compileall -q src tests
+
+# Regenerate sanitized README screenshots
+uv run python scripts/generate_demo_assets.py
+
+# Optional: benchmark against your own populated local index
+code-recall eval generate ~/.code-recall/eval-cases.json 30
+CODE_RECALL_RUN_QUALITY_TESTS=1 \
+CODE_RECALL_QUALITY_CASES=~/.code-recall/eval-cases.json \
+uv run pytest tests/test_search_quality.py -v
 ```
 
 ## Release
 
-Releases are tag driven. CI verifies the version declarations match before publishing.
-The release workflow builds distributions, publishes to PyPI through Trusted Publishing,
-and creates or updates the matching GitHub release.
-
-Before the first release, configure a PyPI Trusted Publisher for this repository and the
-`pypi` GitHub environment. The PyPI distribution name is `claude-code-recall`; the
-installed command remains `claude-code-recall`.
+Releases are tag driven. CI verifies the version declarations match before publishing. The release workflow builds distributions, publishes to PyPI through Trusted Publishing, and creates or updates the matching GitHub release.
 
 Trusted Publisher fields:
 
 | Field | Value |
 |-------|-------|
-| PyPI project name | `claude-code-recall` |
+| PyPI project name | `code-recall` |
 | Owner | `lupuletic` |
-| Repository name | `claude-code-recall` |
+| Repository name | `code-recall` |
 | Workflow name | `release.yml` |
 | Environment name | `pypi` |
 
@@ -358,7 +319,7 @@ uv run pytest -q
 uv run python -m compileall -q src tests
 uv build --no-sources
 
-git tag v0.1.4
+git tag v0.2.2
 git push origin main --tags
 ```
 

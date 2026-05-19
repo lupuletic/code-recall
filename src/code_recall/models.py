@@ -1,4 +1,4 @@
-"""Data models for claude-code-recall."""
+"""Data models for code-recall."""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Session:
-    """A Claude Code session extracted from a .jsonl transcript."""
+    """A coding-agent session extracted from a local transcript."""
 
     session_id: str
     project_path: str
     project_dir: str
     file_path: str
+    provider: str = "claude"
+    provider_session_id: str | None = None
     summary: str | None = None
     first_prompt: str | None = None
     first_reply: str | None = None
@@ -31,6 +33,7 @@ class Session:
     files_modified: str | None = None  # JSON list of file paths
     commands_run: str | None = None  # JSON list of commands
     git_branch_detected: str | None = None
+    model: str | None = None
 
 
 @dataclass
@@ -56,4 +59,7 @@ class SearchResult:
 
     @property
     def resume_command(self) -> str:
-        return f"claude --resume {self.session.session_id}"
+        session_id = self.session.provider_session_id or self.session.session_id
+        if self.session.provider == "codex":
+            return f"codex resume {session_id}"
+        return f"claude --resume {session_id}"

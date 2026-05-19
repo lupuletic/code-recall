@@ -1,8 +1,8 @@
-"""Allow running as `python -m claude_code_recall`."""
+"""Allow running as `python -m code_recall`."""
 
 import sys
 
-from claude_code_recall.cli import main
+from code_recall.cli import main
 
 if __name__ == "__main__":
     try:

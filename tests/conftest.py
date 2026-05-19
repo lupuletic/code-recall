@@ -1,4 +1,4 @@
-"""Shared fixtures for claude-code-recall tests."""
+"""Shared fixtures for code-recall tests."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_recall.db import get_connection, upsert_chunks, upsert_session
-from claude_code_recall.models import Session
+from code_recall.db import get_connection, upsert_chunks, upsert_session
+from code_recall.models import Session
 
 
 # ---------------------------------------------------------------------------
