@@ -1,10 +1,10 @@
-"""Configuration for claude-code-recall."""
+"""Configuration for code-recall."""
 
 from __future__ import annotations
 
 import json
 
-from claude_code_recall.utils import app_data_dir
+from code_recall.utils import app_data_dir
 
 CONFIG_PATH = app_data_dir() / "config.json"
 
@@ -14,7 +14,7 @@ DEFAULTS = {
     "show_subagents": False,
     "relevance_cutoff": 0.4,
     "auto_index_hook": True,
-    "auto_ai_summary": True,
+    "auto_ai_summary": False,
     "update_check": True,
 }
 
@@ -83,9 +83,9 @@ def print_config() -> None:
     """Print current config with descriptions."""
     config = load_config()
 
-    from claude_code_recall import has_semantic
+    from code_recall import has_semantic
 
-    print("claude-code-recall settings")
+    print("code-recall settings")
     print(f"  Config: {CONFIG_PATH}\n")
 
     for key, value in config.items():
@@ -96,9 +96,9 @@ def print_config() -> None:
             print(f"  {key}: {value}{marker}")
             print(f"    {desc}")
             if value in ("semantic", "hybrid", "reranked") and not has_semantic():
-                print(f"    ⚠ Requires: pip install claude-code-recall[semantic]")
+                print(f"    ⚠ Requires: pip install code-recall[semantic]")
         else:
             print(f"  {key}: {value}{marker}")
 
-    print(f"\nSet with: claude-code-recall config <key> <value>")
+    print(f"\nSet with: code-recall config <key> <value>")
     print(f"Modes: {', '.join(SEARCH_MODES)}")

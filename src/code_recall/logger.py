@@ -1,4 +1,4 @@
-"""Logging for claude-code-recall."""
+"""Logging for code-recall."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 import sys
 import time
 
-from claude_code_recall.utils import app_data_dir
+from code_recall.utils import app_data_dir
 
 LOG_DIR = app_data_dir()
 LOG_FILE = LOG_DIR / "debug.log"
@@ -15,12 +15,12 @@ _logger: logging.Logger | None = None
 
 
 def get_logger() -> logging.Logger:
-    """Get the claude-code-recall logger."""
+    """Get the code-recall logger."""
     global _logger
     if _logger is not None:
         return _logger
 
-    _logger = logging.getLogger("claude-code-recall")
+    _logger = logging.getLogger("code-recall")
     _logger.setLevel(logging.WARNING)  # quiet by default
     # No handlers until enable_verbose() is called
     return _logger

@@ -1,4 +1,4 @@
-"""Tests for claude_code_recall.utils."""
+"""Tests for code_recall.utils."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_recall.utils import (
+from code_recall.utils import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     MAX_CHUNK_CHARS,
@@ -18,6 +18,7 @@ from claude_code_recall.utils import (
     _build_fts_text,
     _resolve_path_parts,
     clean_display_text,
+    discover_codex_sessions,
     generate_summary,
     decode_project_path,
     discover_sessions,
@@ -25,6 +26,7 @@ from claude_code_recall.utils import (
     format_date,
     format_size,
     load_sessions_index,
+    parse_codex_session_file,
     parse_session_file,
 )
 
@@ -84,6 +86,130 @@ class TestExtractTextFromContent:
 
     def test_dict_returns_none(self):
         assert extract_text_from_content({"type": "text", "text": "hi"}) is None
+
+
+# ===========================================================================
+# Codex session parsing
+# ===========================================================================
+
+class TestCodexSessions:
+    def test_discover_codex_sessions_from_state_db(self, tmp_path):
+        import sqlite3
+
+        codex_dir = tmp_path / ".codex"
+        session_dir = codex_dir / "sessions" / "2026" / "05" / "19"
+        session_dir.mkdir(parents=True)
+        rollout = session_dir / "rollout-2026-05-19T10-00-00-thread-1.jsonl"
+        rollout.write_text(json.dumps({
+            "timestamp": "2026-05-19T10:00:00Z",
+            "type": "event_msg",
+            "payload": {"type": "user_message", "message": "find the auth bug"},
+        }) + "\n")
+
+        conn = sqlite3.connect(codex_dir / "state_5.sqlite")
+        conn.execute(
+            """CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                title TEXT NOT NULL,
+                first_user_message TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                model TEXT,
+                git_branch TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                created_at_ms INTEGER,
+                updated_at_ms INTEGER,
+                source TEXT NOT NULL,
+                thread_source TEXT,
+                archived INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO threads
+               (id, rollout_path, cwd, title, first_user_message, model_provider, model,
+                git_branch, created_at, updated_at, created_at_ms, updated_at_ms, source,
+                thread_source, archived)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                "thread-1",
+                str(rollout),
+                "/repo/app",
+                "Fix auth bug",
+                "find the auth bug",
+                "openai",
+                "gpt-5.5",
+                "main",
+                1779184800,
+                1779188400,
+                1779184800000,
+                1779188400000,
+                "cli",
+                "user",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        sessions = discover_codex_sessions(codex_dir)
+
+        assert len(sessions) == 1
+        assert sessions[0]["provider"] == "codex"
+        assert sessions[0]["session_id"] == "codex:thread-1"
+        assert sessions[0]["provider_session_id"] == "thread-1"
+        assert sessions[0]["project_path"] == "/repo/app"
+        assert sessions[0]["model"] == "gpt-5.5"
+
+    def test_parse_codex_session_file_extracts_messages_commands_and_files(self, tmp_path):
+        rollout = tmp_path / "rollout.jsonl"
+        rollout.write_text("\n".join([
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:00Z",
+                "type": "session_meta",
+                "payload": {"id": "thread-1", "cwd": "/repo/app", "model": "gpt-5.5"},
+            }),
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:01Z",
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "debug checkout auth"},
+            }),
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:02Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will inspect the middleware."}],
+                },
+            }),
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:03Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "functions.exec_command",
+                    "arguments": json.dumps({"cmd": "pytest tests/test_auth.py", "workdir": "/repo/app"}),
+                },
+            }),
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:04Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": "[external_agent_tool_call: Write]\nfile: /repo/app/auth.py\n[/external_agent_tool_call]",
+                },
+            }),
+        ]) + "\n")
+
+        parsed = parse_codex_session_file(rollout, {"title": "Checkout auth", "model": "gpt-5.5"})
+
+        assert parsed["summary"] == "Checkout auth"
+        assert parsed["first_prompt"] == "debug checkout auth"
+        assert parsed["message_count"] == 1
+        assert "pytest tests/test_auth.py" in parsed["commands_run"]
+        assert "/repo/app/auth.py" in parsed["files_touched"]
+        assert parsed["last_activity"] == "2026-05-19T10:00:04Z"
 
 
 # ===========================================================================
@@ -357,6 +483,71 @@ class TestParseSessionFile:
         p.write_text("\n".join(lines))
         result = parse_session_file(p)
         assert result["message_count"] == 1
+
+    def test_ai_title_pr_and_tool_context_indexed(self, tmp_path):
+        """Operational Claude Code metadata should be searchable later."""
+        lines = [
+            json.dumps({
+                "type": "ai-title",
+                "aiTitle": "Fix checkout webhook validation",
+                "sessionId": "s1",
+            }),
+            json.dumps({
+                "type": "pr-link",
+                "sessionId": "s1",
+                "prNumber": 42,
+                "prUrl": "https://github.example/repo/pull/42",
+                "prRepository": "example/repo",
+            }),
+            json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "debug the payment issue"},
+            }),
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Read",
+                            "input": {"file_path": "/repo/src/webhook_handler.py"},
+                        },
+                        {
+                            "type": "tool_use",
+                            "name": "Grep",
+                            "input": {
+                                "pattern": "validate_signature",
+                                "path": "/repo/src",
+                            },
+                        },
+                    ],
+                },
+            }),
+            json.dumps({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "content": "validate_signature is called by checkout webhook",
+                        }
+                    ],
+                },
+            }),
+        ]
+        p = tmp_path / "metadata.jsonl"
+        p.write_text("\n".join(lines))
+
+        result = parse_session_file(p)
+
+        assert result["message_count"] == 1
+        assert result["summary"] == "Fix checkout webhook validation"
+        assert "/repo/src/webhook_handler.py" in result["files_read"]
+        assert "checkout webhook" in result["messages_text"]
+        assert "Pull request" in result["messages_text"]
+        assert any("Session recall profile" in chunk for chunk in result["chunks"])
 
 
 # ===========================================================================

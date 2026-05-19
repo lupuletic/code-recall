@@ -1,4 +1,4 @@
-"""Tests for claude_code_recall.indexer."""
+"""Tests for code_recall.indexer."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_recall.db import get_all_session_ids, get_connection, get_session_mtime
-from claude_code_recall.indexer import build_index
+from code_recall.db import get_all_session_ids, get_connection, get_session_mtime
+from code_recall.indexer import build_index
+from code_recall.searcher import search
 
 
 class TestBuildIndex:
@@ -200,7 +201,7 @@ class TestBuildIndex:
 
         assert chunk_count > 0
 
-    @patch("claude_code_recall.indexer.has_semantic", return_value=False)
+    @patch("code_recall.indexer.has_semantic", return_value=False)
     def test_no_semantic_deps(self, mock_semantic, projects_dir, db_path):
         """Should work fine without semantic dependencies."""
         stats = build_index(
@@ -228,3 +229,134 @@ class TestBuildIndex:
         assert row["summary"] == "Auth middleware debugging"
         assert row["git_branch"] == "fix/auth"
         assert row["created"] == "2025-01-15T10:00:00Z"
+
+    def test_read_files_are_indexed_for_file_search(self, tmp_path, db_path):
+        """Files only inspected by Claude should still be searchable."""
+        import json
+
+        projects = tmp_path / "projects"
+        proj = projects / "-Users-test-Projects-payments"
+        proj.mkdir(parents=True)
+        session = proj / "session-read.jsonl"
+        session.write_text("\n".join([
+            json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "debug checkout webhook"},
+            }),
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Read",
+                            "input": {"file_path": "/repo/src/webhook_handler.py"},
+                        }
+                    ],
+                },
+            }),
+        ]))
+
+        build_index(projects_dir=projects, db_path=db_path, verbose=False)
+
+        conn = get_connection(db_path)
+        row = conn.execute(
+            "SELECT action FROM session_files WHERE file_path = ?",
+            ("/repo/src/webhook_handler.py",),
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row["action"] == "read"
+
+    def test_indexes_codex_sessions_when_codex_dir_supplied(self, tmp_path, db_path):
+        """Codex threads should be indexed alongside Claude sessions."""
+        import json
+        import sqlite3
+
+        projects = tmp_path / "claude-projects"
+        projects.mkdir()
+        codex_dir = tmp_path / ".codex"
+        session_dir = codex_dir / "sessions" / "2026" / "05" / "19"
+        session_dir.mkdir(parents=True)
+        rollout = session_dir / "rollout-2026-05-19T10-00-00-thread-1.jsonl"
+        rollout.write_text("\n".join([
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:00Z",
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "fix codex auth flow"},
+            }),
+            json.dumps({
+                "timestamp": "2026-05-19T10:00:01Z",
+                "type": "event_msg",
+                "payload": {"type": "agent_message", "message": "The auth flow is fixed."},
+            }),
+        ]) + "\n")
+
+        conn = sqlite3.connect(codex_dir / "state_5.sqlite")
+        conn.execute(
+            """CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                title TEXT NOT NULL,
+                first_user_message TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                model TEXT,
+                git_branch TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                created_at_ms INTEGER,
+                updated_at_ms INTEGER,
+                source TEXT NOT NULL,
+                thread_source TEXT,
+                archived INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO threads
+               (id, rollout_path, cwd, title, first_user_message, model_provider, model,
+                git_branch, created_at, updated_at, created_at_ms, updated_at_ms, source,
+                thread_source, archived)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                "thread-1",
+                str(rollout),
+                "/repo/codex-app",
+                "Fix Codex auth",
+                "fix codex auth flow",
+                "openai",
+                "gpt-5.5",
+                "main",
+                1779184800,
+                1779188400,
+                1779184800000,
+                1779188400000,
+                "cli",
+                "user",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        stats = build_index(projects_dir=projects, codex_dir=codex_dir, db_path=db_path, verbose=False)
+
+        assert stats["indexed"] == 1
+        conn = get_connection(db_path)
+        row = conn.execute("SELECT * FROM sessions WHERE session_id = 'codex:thread-1'").fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row["provider"] == "codex"
+        assert row["provider_session_id"] == "thread-1"
+        assert row["project_path"] == "/repo/codex-app"
+        assert row["summary"] == "Fix Codex auth"
+        assert row["model"] == "gpt-5.5"
+
+        results = search("codex auth flow", db_path=db_path, semantic=False)
+
+        assert results
+        assert results[0].session.provider == "codex"
+        assert results[0].session.provider_session_id == "thread-1"
+        assert results[0].resume_command == "codex resume thread-1"

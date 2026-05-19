@@ -1,4 +1,4 @@
-"""Tests for claude_code_recall.config."""
+"""Tests for code_recall.config."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_recall.config import DEFAULTS, SEARCH_MODES, load_config, save_config, set_value
+from code_recall.config import DEFAULTS, SEARCH_MODES, load_config, save_config, set_value
 
 
 @pytest.fixture(autouse=True)
 def config_path(tmp_path, monkeypatch):
     """Redirect CONFIG_PATH to a temp directory for all tests."""
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr("claude_code_recall.config.CONFIG_PATH", cfg_path)
+    monkeypatch.setattr("code_recall.config.CONFIG_PATH", cfg_path)
     return cfg_path
 
 
@@ -45,7 +45,7 @@ class TestLoadConfig:
         assert config["show_subagents"] is False
         assert config["relevance_cutoff"] == 0.4
         assert config["auto_index_hook"] is True
-        assert config["auto_ai_summary"] is True
+        assert config["auto_ai_summary"] is False
         assert config["update_check"] is True
 
 
@@ -72,7 +72,7 @@ class TestSaveLoadRoundtrip:
 
     def test_creates_parent_dirs(self, tmp_path, monkeypatch):
         nested = tmp_path / "a" / "b" / "config.json"
-        monkeypatch.setattr("claude_code_recall.config.CONFIG_PATH", nested)
+        monkeypatch.setattr("code_recall.config.CONFIG_PATH", nested)
         save_config({"search_mode": "hybrid"})
         assert nested.exists()
 

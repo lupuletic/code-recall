@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-code-recall"
-version = "0.1.4"
-description = "Semantic search across Claude Code sessions. Find past conversations by intent, not just keywords."
+name = "code-recall"
+version = "0.2.2"
+description = "Semantic search across local coding-agent sessions. Find past conversations by intent, not just keywords."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Catalin Lupuleti" }]
-keywords = ["claude", "claude-code", "session", "search", "semantic", "recall"]
+keywords = ["coding-agent", "codex", "session", "search", "semantic", "recall"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -26,21 +26,21 @@ classifiers = [
 ]
 
 [project.scripts]
-claude-code-recall = "claude_code_recall.cli:main"
+code-recall = "code_recall.cli:main"
 
 [project.optional-dependencies]
 semantic = ["fastembed>=0.4", "sqlite-vec>=0.1"]
 tui = ["textual>=1.0"]
-all = ["claude-code-recall[semantic,tui]"]
-dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+all = ["code-recall[semantic,tui]"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "tomli>=2.0; python_version < '3.11'"]
 
 [project.urls]
-Homepage = "https://github.com/lupuletic/claude-code-recall"
-Repository = "https://github.com/lupuletic/claude-code-recall"
-Issues = "https://github.com/lupuletic/claude-code-recall/issues"
+Homepage = "https://github.com/lupuletic/code-recall"
+Repository = "https://github.com/lupuletic/code-recall"
+Issues = "https://github.com/lupuletic/code-recall/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/claude_code_recall"]
+packages = ["src/code_recall"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

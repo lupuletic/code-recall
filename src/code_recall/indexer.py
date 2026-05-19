@@ -1,4 +1,4 @@
-"""Session indexer for claude-code-recall."""
+"""Session indexer for code-recall."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import sys
 import time
 from pathlib import Path
 
-from claude_code_recall import has_semantic
-from claude_code_recall.db import (
+from code_recall import has_semantic
+from code_recall.db import (
     DB_PATH,
     build_session_chains,
     delete_session,
@@ -21,12 +21,15 @@ from claude_code_recall.db import (
     upsert_session_commands,
     upsert_session_files,
 )
-from claude_code_recall.models import Session
-from claude_code_recall.utils import (
+from code_recall.models import Session
+from code_recall.utils import (
+    CODEX_DIR,
     PROJECTS_DIR,
     decode_project_path,
+    discover_codex_sessions,
     discover_sessions,
     load_sessions_index,
+    parse_codex_session_file,
     parse_session_file,
 )
 
@@ -45,6 +48,7 @@ def build_index(
     force: bool = False,
     verbose: bool = True,
     defer_embeddings: bool = False,
+    codex_dir: Path | None = None,
 ) -> dict:
     """Build or update the session index.
 
@@ -59,6 +63,8 @@ def build_index(
 
     # Discover all session files on disk
     discovered = discover_sessions(projects_dir)
+    if codex_dir is not None:
+        discovered.extend(discover_codex_sessions(codex_dir))
 
     if verbose:
         print(f"Found {len(discovered)} session files", file=sys.stderr)
@@ -84,6 +90,7 @@ def build_index(
         session_id = session_info["session_id"]
         project_dir = session_info["project_dir"]
         file_mtime = session_info["mtime"]
+        provider = session_info.get("provider", "claude")
 
         # Skip if already indexed and file hasn't changed
         if not force and session_id in existing_ids:
@@ -92,14 +99,20 @@ def build_index(
                 skipped += 1
                 continue
 
-        # Load sessions-index metadata (cached per project)
-        if project_dir not in index_cache:
-            index_cache[project_dir] = load_sessions_index(project_dir, projects_dir)
-        idx_meta = index_cache[project_dir].get(session_id, {})
+        # Load provider metadata
+        if provider == "codex":
+            idx_meta = session_info
+        else:
+            if project_dir not in index_cache:
+                index_cache[project_dir] = load_sessions_index(project_dir, projects_dir)
+            idx_meta = index_cache[project_dir].get(session_id, {})
 
         # Parse the session file
         try:
-            parsed = parse_session_file(session_info["file_path"])
+            if provider == "codex":
+                parsed = parse_codex_session_file(session_info["file_path"], idx_meta)
+            else:
+                parsed = parse_session_file(session_info["file_path"])
         except Exception:
             errors += 1
             continue
@@ -110,21 +123,27 @@ def build_index(
             continue
 
         # Decode project path
-        project_path = decode_project_path(project_dir, projects_dir)
+        if provider == "codex":
+            project_path = session_info.get("project_path") or project_dir
+        else:
+            project_path = decode_project_path(project_dir, projects_dir)
 
-        # Use sessions-index summary if available, otherwise auto-generate
-        summary = idx_meta.get("summary") or parsed.get("summary")
+        # Use the most descriptive title available, preferring Claude's AI title
+        # over the first-prompt fallback when sessions-index has no summary.
+        summary = idx_meta.get("summary") or parsed.get("ai_title") or parsed.get("summary")
 
         import json as _json
 
-        # Append file names to messages_text so they're FTS-searchable
+        # Append touched file names to messages_text so they're FTS-searchable
         messages_text = parsed["messages_text"]
-        file_names = parsed.get("files_modified", [])
+        file_names = parsed.get("files_touched") or parsed.get("files_modified", [])
         if file_names:
             messages_text += "\n" + " ".join(file_names)
 
         session = Session(
             session_id=session_id,
+            provider=provider,
+            provider_session_id=session_info.get("provider_session_id", session_id),
             project_path=project_path,
             project_dir=project_dir,
             file_path=session_info["file_path"],
@@ -135,7 +154,7 @@ def build_index(
             last_reply=parsed["last_reply"],
             messages_text=messages_text,
             git_branch=idx_meta.get("gitBranch") or parsed.get("git_branch_detected"),
-            files_modified=_json.dumps(parsed.get("files_modified", [])),
+            files_modified=_json.dumps(parsed.get("files_touched") or parsed.get("files_modified", [])),
             commands_run=_json.dumps(parsed.get("commands_run", [])),
             message_count=parsed["message_count"],
             file_size=session_info["file_size"],
@@ -145,6 +164,7 @@ def build_index(
             mtime=file_mtime,
             is_subagent=session_info["is_subagent"],
             parent_session=session_info["parent_session"],
+            model=idx_meta.get("model"),
         )
 
         upsert_session(conn, session)
@@ -154,13 +174,17 @@ def build_index(
         graph_edges = []
         file_records = []
 
-        for file_path in parsed.get("files_modified", []):
+        for file_info in parsed.get("file_actions", []):
+            file_path = file_info.get("path", "")
+            if not file_path:
+                continue
+            action = file_info.get("action", "read")
             file_name = file_path.split("/")[-1]
-            file_records.append({"path": file_path, "name": file_name, "action": "edit"})
+            file_records.append({"path": file_path, "name": file_name, "action": action})
             graph_edges.append({
                 "src_type": "session", "src_name": session_id,
                 "dst_type": "file", "dst_name": file_path,
-                "rel": "edited",
+                "rel": "edited" if action == "edit" else "read",
             })
 
         cmd_records = []
@@ -213,6 +237,8 @@ def build_index(
     discovered_ids = {s["session_id"] for s in discovered}
     removed = 0
     for old_id in existing_ids - discovered_ids:
+        if codex_dir is None and old_id.startswith("codex:"):
+            continue
         delete_session(conn, old_id)
         removed += 1
 
@@ -249,6 +275,7 @@ def build_index(
 def ensure_index(
     projects_dir: Path = PROJECTS_DIR,
     db_path: Path = DB_PATH,
+    codex_dir: Path | None = CODEX_DIR,
     verbose: bool = True,
 ) -> None:
     """Ensure the index exists and is reasonably up-to-date.
@@ -263,24 +290,29 @@ def ensure_index(
             print("Building index for the first time...", file=sys.stderr)
         # Build FTS index immediately (fast, ~2s), skip embeddings
         build_index(
-            projects_dir, db_path, force=False, verbose=verbose,
+            projects_dir=projects_dir, codex_dir=codex_dir, db_path=db_path, force=False, verbose=verbose,
             defer_embeddings=True,
         )
         # Generate embeddings in background
         if has_semantic():
-            _spawn_background_embeddings(db_path, projects_dir, verbose)
+            _spawn_background_embeddings(db_path, projects_dir, codex_dir, verbose)
     else:
         # Quick incremental check — always defer embeddings (only generate during explicit `index`)
         try:
             build_index(
-                projects_dir, db_path, force=False, verbose=False,
+                projects_dir=projects_dir, codex_dir=codex_dir, db_path=db_path, force=False, verbose=False,
                 defer_embeddings=True,
             )
         except Exception:
             pass  # DB locked by background embeddings — search with existing index
 
 
-def _spawn_background_embeddings(db_path: Path, projects_dir: Path, verbose: bool) -> None:
+def _spawn_background_embeddings(
+    db_path: Path,
+    projects_dir: Path,
+    codex_dir: Path | None,
+    verbose: bool,
+) -> None:
     """Spawn a background process to generate embeddings."""
     import subprocess as sp
 
@@ -290,18 +322,22 @@ def _spawn_background_embeddings(db_path: Path, projects_dir: Path, verbose: boo
             file=sys.stderr,
         )
 
-    # Run `claude-code-recall index --quiet` in background, preserving custom paths
+    # Run `code-recall index --quiet` in background, preserving custom paths
     import shutil
 
-    claude_code_recall_bin = shutil.which("claude-code-recall")
-    base_cmd = [claude_code_recall_bin, "index", "--quiet"] if claude_code_recall_bin else \
-               [sys.executable, "-m", "claude_code_recall", "index", "--quiet"]
+    code_recall_bin = shutil.which("code-recall")
+    base_cmd = [code_recall_bin, "index", "--quiet"] if code_recall_bin else \
+               [sys.executable, "-m", "code_recall", "index", "--quiet"]
 
     # Pass custom paths so the background process uses the same DB/source
     if db_path != DB_PATH:
         base_cmd.extend(["--db", str(db_path)])
     if projects_dir != PROJECTS_DIR:
         base_cmd.extend(["--claude-dir", str(projects_dir)])
+    if codex_dir is None:
+        base_cmd.append("--no-codex")
+    elif codex_dir != CODEX_DIR:
+        base_cmd.extend(["--codex-dir", str(codex_dir)])
 
     sp.Popen(
         base_cmd,
@@ -379,7 +415,7 @@ def _generate_embeddings(
 ) -> int:
     """Generate embeddings for sessions that don't have them yet."""
     try:
-        from claude_code_recall.embedder import get_embedder
+        from code_recall.embedder import get_embedder
     except ImportError:
         return 0
 
@@ -387,7 +423,7 @@ def _generate_embeddings(
     if embedder is None:
         return 0
 
-    from claude_code_recall.db import load_vec_extension
+    from code_recall.db import load_vec_extension
 
     load_vec_extension(conn)
 

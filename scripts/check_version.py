@@ -10,17 +10,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
-INIT = ROOT / "src" / "claude_code_recall" / "__init__.py"
+INIT = ROOT / "src" / "code_recall" / "__init__.py"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", help="Optional release tag, e.g. v0.1.4")
+    parser.add_argument("--tag", help="Optional release tag, e.g. v0.2.2")
     args = parser.parse_args(argv)
 
     versions = {
         "pyproject.toml": _read_pyproject_version(PYPROJECT),
-        "src/claude_code_recall/__init__.py": _read_init_version(INIT),
+        "src/code_recall/__init__.py": _read_init_version(INIT),
     }
     if args.tag:
         versions["tag"] = args.tag.removeprefix("v")

@@ -1,4 +1,4 @@
-"""Tests for claude_code_recall.db."""
+"""Tests for code_recall.db."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_recall.db import (
+from code_recall.db import (
     build_session_chains,
     delete_session,
     get_all_session_ids,
@@ -21,7 +21,7 @@ from claude_code_recall.db import (
     upsert_session_commands,
     upsert_session_files,
 )
-from claude_code_recall.models import Session
+from code_recall.models import Session
 
 
 # ===========================================================================
@@ -94,7 +94,7 @@ class TestSchema:
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()
         assert row is not None
-        assert row["value"] == "3"
+        assert row["value"] == "4"
 
     def test_sessions_columns(self, db_conn):
         cols = {
@@ -102,13 +102,67 @@ class TestSchema:
             for row in db_conn.execute("PRAGMA table_info(sessions)").fetchall()
         }
         expected = {
-            "session_id", "project_path", "project_dir", "file_path",
+            "session_id", "provider", "provider_session_id", "project_path", "project_dir", "file_path",
             "summary", "first_prompt", "first_reply", "last_prompt", "last_reply",
             "messages_text", "git_branch", "message_count", "file_size",
             "created", "modified", "last_activity", "mtime",
-            "is_subagent", "parent_session",
+            "is_subagent", "parent_session", "model",
         }
         assert expected.issubset(cols)
+
+    def test_migrates_v3_database_before_provider_index(self, tmp_path):
+        """Opening an older DB must add provider before indexing it."""
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '3');
+            CREATE TABLE sessions (
+                session_id TEXT PRIMARY KEY,
+                project_path TEXT,
+                project_dir TEXT,
+                file_path TEXT,
+                summary TEXT,
+                first_prompt TEXT,
+                first_reply TEXT,
+                last_prompt TEXT,
+                last_reply TEXT,
+                messages_text TEXT,
+                git_branch TEXT,
+                message_count INTEGER DEFAULT 0,
+                file_size INTEGER DEFAULT 0,
+                created TEXT,
+                modified TEXT,
+                last_activity TEXT,
+                mtime REAL DEFAULT 0,
+                is_subagent INTEGER DEFAULT 0,
+                parent_session TEXT,
+                files_modified TEXT,
+                commands_run TEXT,
+                git_branch_detected TEXT
+            );
+            """
+        )
+        conn.close()
+
+        migrated = get_connection(db_path)
+        cols = {
+            row["name"]
+            for row in migrated.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        index_row = migrated.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sessions_provider'"
+        ).fetchone()
+        version = migrated.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()["value"]
+        migrated.close()
+
+        assert "provider" in cols
+        assert "provider_session_id" in cols
+        assert index_row is not None
+        assert version == "4"
 
     def test_chunks_columns(self, db_conn):
         cols = {

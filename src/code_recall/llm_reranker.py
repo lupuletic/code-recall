@@ -1,9 +1,8 @@
-"""LLM-based reranking using claude -p for highest-quality results."""
+"""LLM-based reranking using an available assistant CLI."""
 
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 
@@ -11,26 +10,30 @@ import sys
 def llm_rerank(
     query: str,
     candidates: list[dict],
-    model: str = "haiku",
+    model: str | None = None,
     top_k: int = 10,
+    assistant_provider: str = "auto",
+    preferred_provider: str | None = None,
 ) -> list[int]:
-    """Rerank search candidates using Claude via `claude -p`.
+    """Rerank search candidates using Claude Code or Codex.
 
-    Sends the query + candidate summaries to Claude and asks it to
-    rank them by relevance. Returns ordered list of candidate indices.
+    Sends the query + candidate summaries to an available assistant and asks it
+    to rank them by relevance. Returns ordered list of candidate indices.
 
     Args:
         query: User's search query
         candidates: List of dicts with session_id, summary, first_prompt, etc.
-        model: Claude model to use (haiku is fastest/cheapest)
+        model: Optional model override for the selected assistant
         top_k: Number of top results to return
 
     Returns:
         List of original candidate indices, ordered by relevance.
-        Empty list if claude is not available.
+        Original order if no supported assistant is available.
     """
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
+    from code_recall.agentic import _assistant_command, _select_assistant
+
+    assistant = _select_assistant(assistant_provider, preferred_provider, [])
+    if assistant is None:
         return list(range(min(top_k, len(candidates))))
 
     # Build compact candidate descriptions
@@ -47,9 +50,9 @@ def llm_rerank(
         if last:
             candidate_text += f"    Last: {last}\n"
 
-    prompt = f"""You are ranking Claude Code session search results by relevance.
+    prompt = f"""You are ranking coding-agent session search results by relevance.
 
-The user is trying to find a past Claude Code conversation. They might use project names, topics, or partial descriptions. A "session" is a conversation with Claude Code about a coding task.
+The user is trying to find a past Claude Code or Codex conversation. They might use project names, topics, or partial descriptions. A "session" is a conversation with a coding agent about a coding task.
 
 Query: "{query}"
 
@@ -64,12 +67,7 @@ Return ONLY a JSON array, e.g. [3, 0, 7, 1, 2]. No explanation."""
 
     try:
         result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--model", model,
-                "--no-session-persistence",
-                "--output-format", "text",
-            ],
+            _assistant_command(assistant[0], assistant[1], model, use_read_tools=False),
             input=prompt,
             capture_output=True,
             text=True,
