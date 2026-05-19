@@ -8,7 +8,6 @@ Search, inspect, chat with, and resume your local Claude Code and Codex history 
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-331%20passing-34D058.svg)](#development)
 [![Local first](https://img.shields.io/badge/local--first-no%20API%20keys-34D058.svg)](#privacy)
 [![Providers](https://img.shields.io/badge/providers-Claude%20Code%20%2B%20Codex-8B5CF6.svg)](#providers)
 
@@ -32,7 +31,7 @@ Coding agents leave behind useful local transcripts, but built-in resume pickers
 - "the Docker healthcheck that broke deploys"
 - "the branch where the OAuth callback tests were added"
 
-**code-recall turns those transcripts into a searchable memory layer.** It indexes Claude Code and Codex sessions, ranks results with keyword search, semantic search, reranking, and graph signals, then lets you jump back into the right project with the right provider command.
+code-recall indexes Claude Code and Codex sessions, ranks results with keyword search, semantic search, reranking, and graph signals, then lets you jump back into the right project with the right provider command.
 
 ## What It Does
 
@@ -43,22 +42,6 @@ Coding agents leave behind useful local transcripts, but built-in resume pickers
 - Chat with a selected transcript from the TUI.
 - Keep the index fresh with quick incremental indexing and Claude Code session-end hooks.
 - Stay local-first: your SQLite index and transcript reads stay on your machine.
-
-## Screenshots
-
-All README media is generated from synthetic demo data using [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py). It does not come from a real work index.
-
-| Search across providers | Understand why it matched |
-|---|---|
-| <img src="docs/assets/code-recall-search.svg" alt="Search results with Claude Code and Codex provider badges" width="440"> | <img src="docs/assets/code-recall-why.svg" alt="Why tab showing matched evidence for a result" width="440"> |
-
-| Inspect activity | Find related sessions |
-|---|---|
-| <img src="docs/assets/code-recall-activity.svg" alt="Activity tab showing files touched and commands run" width="440"> | <img src="docs/assets/code-recall-related.svg" alt="Related tab showing sessions connected through shared files" width="440"> |
-
-| Chat with a transcript |
-|---|
-| <img src="docs/assets/code-recall-ai-chat.svg" alt="AI transcript chat for a selected coding-agent session" width="880"> |
 
 ## Install
 
@@ -195,17 +178,16 @@ code-recall keeps the index fresh in two ways:
 - Every search/TUI startup runs a quick incremental index over Claude Code and Codex sources before searching.
 - On first run or `code-recall install-hooks`, code-recall installs a Claude Code `SessionEnd` hook that runs `code-recall index --quiet` when Claude Code sessions end.
 
-Codex sessions are indexed on the next incremental index/search run. There is no Codex session-end hook installed today because Codex does not expose the same `SessionEnd` hook surface in this repo's integration path.
+Codex doesn't currently expose a session-end hook, so Codex sessions are picked up on the next incremental index or search.
 
 ## Privacy
 
-code-recall is designed for local developer recall:
+code-recall runs locally:
 
 - The index is a local SQLite database under your app data directory.
 - Keyword and graph search do not require network calls.
 - Semantic search uses local embeddings.
 - AI investigation and transcript chat are explicit actions, not automatic background calls.
-- README screenshots are synthetic and reproducible from [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py).
 
 ## Architecture
 
@@ -300,27 +282,7 @@ uv run pytest tests/test_search_quality.py -v
 
 ## Release
 
-Releases are tag driven. CI verifies the version declarations match before publishing. The release workflow builds distributions, publishes to PyPI through Trusted Publishing, and creates or updates the matching GitHub release.
-
-Trusted Publisher fields:
-
-| Field | Value |
-|-------|-------|
-| PyPI project name | `code-recall` |
-| Owner | `lupuletic` |
-| Repository name | `code-recall` |
-| Workflow name | `release.yml` |
-| Environment name | `pypi` |
-
-```bash
-uv run python scripts/check_version.py
-uv run pytest -q
-uv run python -m compileall -q src tests
-uv build --no-sources
-
-git tag v0.2.2
-git push origin main --tags
-```
+Release workflow and Trusted Publisher details: [docs/RELEASE.md](docs/RELEASE.md).
 
 ## License
 
