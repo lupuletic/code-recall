@@ -15,7 +15,7 @@ Search, inspect, chat with, and resume your local Claude Code and Codex history 
 </div>
 
 <p align="center">
-  <img src="docs/assets/code-recall-search.svg" alt="code-recall TUI showing a sanitized search for Stripe webhook signature work" width="980">
+  <img src="docs/assets/code-recall-demo.gif" alt="code-recall TUI demo showing sanitized search, match evidence, activity, related sessions, and AI transcript chat" width="980">
 </p>
 
 ```bash
@@ -43,6 +43,22 @@ Coding agents leave behind useful local transcripts, but built-in resume pickers
 - Chat with a selected transcript from the TUI.
 - Keep the index fresh with quick incremental indexing and Claude Code session-end hooks.
 - Stay local-first: your SQLite index and transcript reads stay on your machine.
+
+## Screenshots
+
+All README media is generated from synthetic demo data using [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py). It does not come from a real work index.
+
+| Search across providers | Understand why it matched |
+|---|---|
+| <img src="docs/assets/code-recall-search.svg" alt="Search results with Claude Code and Codex provider badges" width="440"> | <img src="docs/assets/code-recall-why.svg" alt="Why tab showing matched evidence for a result" width="440"> |
+
+| Inspect activity | Find related sessions |
+|---|---|
+| <img src="docs/assets/code-recall-activity.svg" alt="Activity tab showing files touched and commands run" width="440"> | <img src="docs/assets/code-recall-related.svg" alt="Related tab showing sessions connected through shared files" width="440"> |
+
+| Chat with a transcript |
+|---|
+| <img src="docs/assets/code-recall-ai-chat.svg" alt="AI transcript chat for a selected coding-agent session" width="880"> |
 
 ## Install
 
@@ -273,7 +289,7 @@ uv run python scripts/check_version.py
 uv run python -m compileall -q src tests
 
 # Regenerate sanitized README screenshots
-uv run python scripts/generate_demo_assets.py
+uv run --extra tui --with pillow python scripts/generate_demo_assets.py
 
 # Optional: benchmark against your own populated local index
 code-recall eval generate ~/.code-recall/eval-cases.json 30

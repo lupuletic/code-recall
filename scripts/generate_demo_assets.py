@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +33,14 @@ from code_recall.tui import DetailPanel, RecallApp
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ASSET_DIR = ROOT / "docs" / "assets"
 DEMO_QUERY = "stripe webhook signature"
+DEMO_GIF = "code-recall-demo.gif"
+DEMO_FRAMES: tuple[tuple[str, int], ...] = (
+    ("code-recall-search.svg", 1600),
+    ("code-recall-why.svg", 1800),
+    ("code-recall-activity.svg", 1800),
+    ("code-recall-related.svg", 1600),
+    ("code-recall-ai-chat.svg", 2600),
+)
 
 
 @dataclass(frozen=True)
@@ -356,6 +366,20 @@ async def render_assets(asset_dir: Path) -> None:
             db_path=db_path,
             results=results,
             asset_dir=asset_dir,
+            filename="code-recall-activity.svg",
+            tab="activity",
+        )
+        await _render_screenshot(
+            db_path=db_path,
+            results=results,
+            asset_dir=asset_dir,
+            filename="code-recall-related.svg",
+            tab="related",
+        )
+        await _render_screenshot(
+            db_path=db_path,
+            results=results,
+            asset_dir=asset_dir,
             filename="code-recall-ai-chat.svg",
             tab="ai",
             chat_messages=[
@@ -372,6 +396,65 @@ async def render_assets(asset_dir: Path) -> None:
         )
 
 
+def _svg_to_png(svg_path: Path, png_path: Path) -> None:
+    try:
+        import cairosvg  # type: ignore[import-untyped]
+
+        cairosvg.svg2png(url=str(svg_path), write_to=str(png_path))
+        return
+    except ImportError:
+        pass
+
+    sips = shutil.which("sips")
+    if not sips and Path("/usr/bin/sips").exists():
+        sips = "/usr/bin/sips"
+    if sips:
+        subprocess.run(
+            [sips, "-s", "format", "png", str(svg_path), "--out", str(png_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+
+    raise RuntimeError(
+        "GIF generation requires cairosvg or macOS sips for SVG to PNG conversion."
+    )
+
+
+def render_gif(asset_dir: Path) -> None:
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError(
+            "GIF generation requires Pillow. Run with: "
+            "uv run --with pillow --with cairosvg python scripts/generate_demo_assets.py"
+        ) from exc
+
+    frames: list[Image.Image] = []
+    durations: list[int] = []
+    with tempfile.TemporaryDirectory(prefix="code-recall-gif-") as tmp:
+        tmp_dir = Path(tmp)
+        for index, (svg_name, duration_ms) in enumerate(DEMO_FRAMES):
+            svg_path = asset_dir / svg_name
+            if not svg_path.exists():
+                raise FileNotFoundError(f"missing demo frame: {svg_path}")
+            png_path = tmp_dir / f"frame-{index}.png"
+            _svg_to_png(svg_path, png_path)
+            frame = Image.open(png_path).convert("P", palette=Image.Palette.ADAPTIVE)
+            frames.append(frame)
+            durations.append(duration_ms)
+
+        frames[0].save(
+            asset_dir / DEMO_GIF,
+            save_all=True,
+            append_images=frames[1:],
+            duration=durations,
+            loop=0,
+            optimize=True,
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -382,7 +465,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     asyncio.run(render_assets(args.asset_dir))
-    print(f"Generated demo screenshots in {args.asset_dir}")
+    render_gif(args.asset_dir)
+    print(f"Generated demo screenshots and GIF in {args.asset_dir}")
 
 
 if __name__ == "__main__":
