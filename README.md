@@ -44,23 +44,6 @@ Coding agents leave behind useful local transcripts, but built-in resume pickers
 - Keep the index fresh with quick incremental indexing and Claude Code session-end hooks.
 - Stay local-first: your SQLite index and transcript reads stay on your machine.
 
-## Screenshots
-
-All screenshots in this README are generated from synthetic demo data using [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py). They do not come from a real work index.
-
-| Search across providers | Understand why it matched | Chat with a transcript |
-|---|---|---|
-| <img src="docs/assets/code-recall-search.svg" alt="Search results with Claude Code and Codex provider badges" width="310"> | <img src="docs/assets/code-recall-why.svg" alt="Why tab showing matched evidence for a result" width="310"> | <img src="docs/assets/code-recall-ai-chat.svg" alt="AI transcript chat for a selected coding-agent session" width="310"> |
-
-For a short GIF or product demo, a good sanitized sequence is:
-
-1. Search `stripe webhook signature`.
-2. Highlight the top result and show the provider badge, project, branch, and `why:` line.
-3. Press `2` for the Why tab and show matched evidence.
-4. Press `p` to cycle Claude Code and Codex provider scopes.
-5. Press `4` to show related sessions that touched the same files.
-6. Press `5` and ask: `What changed and what should I verify before resuming?`
-
 ## Install
 
 <details open>
