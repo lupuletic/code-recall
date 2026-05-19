@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "query": "where did we debug the auth middleware 401s",
+      "expected_project": "myapp",
+      "expected_terms": ["auth", "middleware"],
+      "top_k": 3
+    },
+    {
+      "query": "session that inspected the checkout webhook handler",
+      "expected_terms": ["checkout", "webhook"],
+      "top_k": 3
+    },
+    {
+      "query": "PR where we fixed settings page validation",
+      "expected_terms": ["pull request", "settings", "validation"],
+      "top_k": 5
+    }
+  ]
+}

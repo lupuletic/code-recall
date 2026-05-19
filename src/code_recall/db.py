@@ -1,17 +1,17 @@
-"""SQLite database management for claude-code-recall."""
+"""SQLite database management for code-recall."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-from claude_code_recall.models import Session
-from claude_code_recall.utils import app_data_dir
+from code_recall.models import Session
+from code_recall.utils import app_data_dir
 
 DB_DIR = app_data_dir()
 DB_PATH = DB_DIR / "index.db"
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'claude',
+    provider_session_id TEXT,
     project_path TEXT,
     project_dir TEXT,
     file_path TEXT,
@@ -41,7 +43,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     parent_session TEXT,
     files_modified TEXT,
     commands_run TEXT,
-    git_branch_detected TEXT
+    git_branch_detected TEXT,
+    model TEXT
 );
 
 -- Chunks table for multi-embed semantic search
@@ -152,10 +155,14 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create tables if they don't exist, run migrations if needed."""
     conn.executescript(SCHEMA_SQL)
+    _ensure_column(conn, "sessions", "provider", "TEXT NOT NULL DEFAULT 'claude'")
+    _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
     _ensure_column(conn, "sessions", "last_activity", "TEXT")
+    _ensure_column(conn, "sessions", "model", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider)")
 
     version = _get_meta(conn, "schema_version")
-    if version is None:
+    if version != str(SCHEMA_VERSION):
         _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
 
 
@@ -183,13 +190,15 @@ def upsert_session(conn: sqlite3.Connection, session: Session) -> None:
     """Insert or update a session in the database."""
     conn.execute(
         """INSERT INTO sessions
-           (session_id, project_path, project_dir, file_path,
+           (session_id, provider, provider_session_id, project_path, project_dir, file_path,
             summary, first_prompt, first_reply, last_prompt, last_reply,
             messages_text, git_branch, message_count, file_size,
             created, modified, last_activity, mtime, is_subagent, parent_session,
-            files_modified, commands_run, git_branch_detected)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            files_modified, commands_run, git_branch_detected, model)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(session_id) DO UPDATE SET
+             provider=excluded.provider,
+             provider_session_id=excluded.provider_session_id,
              project_path=excluded.project_path,
              project_dir=excluded.project_dir,
              file_path=excluded.file_path,
@@ -210,9 +219,12 @@ def upsert_session(conn: sqlite3.Connection, session: Session) -> None:
              parent_session=excluded.parent_session,
              files_modified=excluded.files_modified,
              commands_run=excluded.commands_run,
-             git_branch_detected=excluded.git_branch_detected""",
+             git_branch_detected=excluded.git_branch_detected,
+             model=excluded.model""",
         (
             session.session_id,
+            session.provider,
+            session.provider_session_id or session.session_id,
             session.project_path,
             session.project_dir,
             session.file_path,
@@ -234,6 +246,7 @@ def upsert_session(conn: sqlite3.Connection, session: Session) -> None:
             session.files_modified,
             session.commands_run,
             session.git_branch_detected,
+            session.model,
         ),
     )
 
@@ -334,18 +347,26 @@ def build_session_chains(conn: sqlite3.Connection) -> None:
 
 
 def get_related_sessions(conn: sqlite3.Connection, session_id: str, limit: int = 5) -> list:
-    """Find sessions related to this one via shared files."""
+    """Find sessions related to this one via shared files.
+
+    Read-only file access is included because historical debugging sessions
+    often inspect the same files without editing them.
+    """
     rows = conn.execute("""
         SELECT s.session_id, s.project_path, s.summary, s.message_count, s.modified,
-               COUNT(DISTINCT ge2.target_name) as shared_files
+               COUNT(DISTINCT ge2.target_name) as shared_files,
+               SUM(CASE WHEN ge2.relationship = 'edited' THEN 1 ELSE 0 END) as edit_hits
         FROM graph_edges ge1
         JOIN graph_edges ge2 ON ge1.target_name = ge2.target_name
             AND ge1.target_type = ge2.target_type
             AND ge1.session_id != ge2.session_id
         JOIN sessions s ON s.session_id = ge2.session_id AND s.is_subagent = 0
-        WHERE ge1.session_id = ? AND ge1.relationship = 'edited'
+        WHERE ge1.session_id = ?
+          AND ge1.target_type = 'file'
+          AND ge1.relationship IN ('edited', 'read')
+          AND ge2.relationship IN ('edited', 'read')
         GROUP BY s.session_id
-        ORDER BY shared_files DESC
+        ORDER BY edit_hits DESC, shared_files DESC
         LIMIT ?
     """, (session_id, limit)).fetchall()
     return rows

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# claude-recall installer
-# Usage: curl -sSL https://raw.githubusercontent.com/anthropics/claude-recall/main/install.sh | bash
+# code-recall installer
+# Usage: curl -sSL https://raw.githubusercontent.com/lupuletic/code-recall/main/install.sh | bash
 
-PACKAGE="claude-recall"
+PACKAGE="code-recall"
 EXTRAS="textual fastembed sqlite-vec"
 
 # Use local path if running from the repo directory
@@ -13,7 +13,7 @@ if [ -f "$SCRIPT_DIR/pyproject.toml" ]; then
     PACKAGE="$SCRIPT_DIR"
 fi
 
-echo "Installing claude-recall..."
+echo "Installing code-recall..."
 echo ""
 
 # Detect best installer
@@ -48,11 +48,11 @@ fi
 
 echo ""
 echo "Building search index (first run)..."
-claude-recall index --quiet 2>/dev/null || true
+code-recall index --quiet 2>/dev/null || true
 
 echo ""
 echo "Done! Try it:"
 echo ""
-echo "  claude-recall \"debugging auth middleware\""
-echo "  claude-recall                              # interactive TUI"
+echo "  code-recall \"debugging auth middleware\""
+echo "  code-recall                              # interactive TUI"
 echo ""

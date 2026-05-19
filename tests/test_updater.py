@@ -1,10 +1,10 @@
-"""Tests for claude_code_recall.updater."""
+"""Tests for code_recall.updater."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from claude_code_recall import updater
+from code_recall import updater
 
 
 def test_is_newer_compares_dotted_versions():
@@ -16,10 +16,10 @@ def test_is_newer_compares_dotted_versions():
 
 
 def test_format_command_quotes_shell_arguments():
-    command = ["python", "-m", "pip", "install", "--upgrade", "claude-code-recall[all]"]
+    command = ["python", "-m", "pip", "install", "--upgrade", "code-recall[all]"]
 
     assert updater.format_command(command) == (
-        "python -m pip install --upgrade 'claude-code-recall[all]'"
+        "python -m pip install --upgrade 'code-recall[all]'"
     )
 
 
@@ -29,7 +29,7 @@ def test_detect_update_command_prefers_current_uv_tool(monkeypatch):
 
     def fake_run(command, **kwargs):
         assert command == ["uv", "tool", "list"]
-        return SimpleNamespace(returncode=0, stdout="claude-code-recall v0.1.4\n")
+        return SimpleNamespace(returncode=0, stdout="code-recall v0.1.4\n")
 
     monkeypatch.setattr(updater.shutil, "which", fake_which)
     monkeypatch.setattr(updater.subprocess, "run", fake_run)
@@ -37,7 +37,7 @@ def test_detect_update_command_prefers_current_uv_tool(monkeypatch):
     detected = updater.detect_update_command()
 
     assert detected.method == "uv tool"
-    assert detected.command == ["uv", "tool", "upgrade", "claude-code-recall"]
+    assert detected.command == ["uv", "tool", "upgrade", "code-recall"]
 
 
 def test_detect_update_command_migrates_legacy_uv_tool(monkeypatch):
@@ -46,7 +46,7 @@ def test_detect_update_command_migrates_legacy_uv_tool(monkeypatch):
 
     def fake_run(command, **kwargs):
         assert command == ["uv", "tool", "list"]
-        return SimpleNamespace(returncode=0, stdout="claude-recall v0.1.3\n")
+        return SimpleNamespace(returncode=0, stdout="claude-code-recall v0.1.8\n")
 
     monkeypatch.setattr(updater.shutil, "which", fake_which)
     monkeypatch.setattr(updater.subprocess, "run", fake_run)
@@ -55,7 +55,7 @@ def test_detect_update_command_migrates_legacy_uv_tool(monkeypatch):
 
     assert detected.method == "uv tool"
     assert detected.command == [
-        "uv", "tool", "install", "--force", "claude-code-recall",
+        "uv", "tool", "install", "--force", "code-recall",
         "--with", "textual", "--with", "fastembed", "--with", "sqlite-vec",
     ]
 
@@ -68,7 +68,7 @@ def test_detect_update_command_uses_pipx_when_uv_tool_absent(monkeypatch):
         assert command == ["pipx", "list", "--json"]
         return SimpleNamespace(
             returncode=0,
-            stdout='{"venvs": {"claude-code-recall": {"metadata": {}}}}',
+            stdout='{"venvs": {"code-recall": {"metadata": {}}}}',
         )
 
     monkeypatch.setattr(updater.shutil, "which", fake_which)
@@ -77,7 +77,7 @@ def test_detect_update_command_uses_pipx_when_uv_tool_absent(monkeypatch):
     detected = updater.detect_update_command()
 
     assert detected.method == "pipx"
-    assert detected.command == ["pipx", "upgrade", "claude-code-recall"]
+    assert detected.command == ["pipx", "upgrade", "code-recall"]
 
 
 def test_detect_update_command_falls_back_to_pip(monkeypatch):
@@ -86,7 +86,7 @@ def test_detect_update_command_falls_back_to_pip(monkeypatch):
     detected = updater.detect_update_command()
 
     assert detected.method == "pip"
-    assert detected.command[-2:] == ["--upgrade", "claude-code-recall[all]"]
+    assert detected.command[-2:] == ["--upgrade", "code-recall[all]"]
 
 
 def test_run_update_reports_already_current(monkeypatch, capsys):
@@ -103,7 +103,7 @@ def test_run_update_prints_command_without_yes(monkeypatch, capsys):
     monkeypatch.setattr(
         updater,
         "detect_update_command",
-        lambda: updater.UpdateCommand(["uv", "tool", "upgrade", "claude-code-recall"], "uv tool"),
+        lambda: updater.UpdateCommand(["uv", "tool", "upgrade", "code-recall"], "uv tool"),
     )
 
     assert updater.run_update(yes=False) == 0
@@ -111,7 +111,7 @@ def test_run_update_prints_command_without_yes(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Current version: 0.1.3" in out
     assert "Latest version:  0.1.4" in out
-    assert "uv tool upgrade claude-code-recall" in out
+    assert "uv tool upgrade code-recall" in out
     assert "Run with --yes" in out
 
 
@@ -122,7 +122,7 @@ def test_run_update_executes_with_yes(monkeypatch):
     monkeypatch.setattr(
         updater,
         "detect_update_command",
-        lambda: updater.UpdateCommand(["uv", "tool", "upgrade", "claude-code-recall"], "uv tool"),
+        lambda: updater.UpdateCommand(["uv", "tool", "upgrade", "code-recall"], "uv tool"),
     )
     monkeypatch.setattr(
         updater.subprocess,
@@ -131,4 +131,4 @@ def test_run_update_executes_with_yes(monkeypatch):
     )
 
     assert updater.run_update(yes=True, quiet=True) == 0
-    assert calls == [["uv", "tool", "upgrade", "claude-code-recall"]]
+    assert calls == [["uv", "tool", "upgrade", "code-recall"]]

@@ -1,4 +1,4 @@
-"""CLI interface for claude-code-recall."""
+"""CLI interface for code-recall."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-from claude_code_recall import __version__
-from claude_code_recall.db import DB_PATH, get_connection, get_stats
-from claude_code_recall.indexer import build_index, ensure_index
-from claude_code_recall.searcher import search
-from claude_code_recall.utils import (
+from code_recall import __version__
+from code_recall.db import DB_PATH, get_connection, get_stats
+from code_recall.indexer import build_index, ensure_index
+from code_recall.searcher import search
+from code_recall.utils import (
+    CODEX_DIR,
     PROJECTS_DIR,
     app_data_dir,
     clean_display_text,
@@ -19,8 +20,8 @@ from claude_code_recall.utils import (
     format_size,
 )
 
-COMMAND_NAME = "claude-code-recall"
-LEGACY_COMMAND_NAME = "claude-recall"
+COMMAND_NAME = "code-recall"
+LEGACY_COMMAND_NAMES = ("claude-code-recall", "claude-recall")
 HOOKS_MARKER = app_data_dir() / ".hooks-installed"
 
 
@@ -34,8 +35,8 @@ def main(argv: list[str] | None = None) -> None:
 
 def _run(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="claude-code-recall",
-        description="Semantic search across Claude Code sessions.",
+        prog="code-recall",
+        description="Semantic search across local coding-agent sessions.",
         usage="%(prog)s [query ...] [options]\n       %(prog)s <command> [options]",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -43,6 +44,10 @@ def _run(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--claude-dir", type=Path, default=PROJECTS_DIR, help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--codex-dir", type=Path, default=CODEX_DIR, help=argparse.SUPPRESS
+    )
+    parser.add_argument("--no-codex", action="store_true", help=argparse.SUPPRESS)
 
     # Search options (work both with and without 'search' subcommand)
     parser.add_argument("query", nargs="*", help="Search query (or subcommand)")
@@ -61,16 +66,21 @@ def _run(argv: list[str] | None = None) -> None:
     parser.add_argument("--force", action="store_true", help="Force full reindex (with 'index')")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
     parser.add_argument("-y", "--yes", action="store_true", help="Confirm update command")
+    parser.add_argument("--ai-model", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--ai-timeout", type=int, default=90, help=argparse.SUPPRESS)
+    parser.add_argument("--no-ai-tools", action="store_true", help=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
+    if args.no_codex:
+        args.codex_dir = None
 
     # Setup logging
-    from claude_code_recall.logger import enable_verbose, get_logger
+    from code_recall.logger import enable_verbose, get_logger
 
     log = get_logger()
     if getattr(args, "verbose", False):
         enable_verbose(log)
-    log.debug(f"claude-code-recall started, args={vars(args)}")
+    log.debug(f"code-recall started, args={vars(args)}")
 
     # Route to subcommands if the first positional arg is a known command
     command = args.query[0] if args.query else None
@@ -85,6 +95,10 @@ def _run(argv: list[str] | None = None) -> None:
         _cmd_config(args)
     elif command == "update":
         _cmd_update(args)
+    elif command == "eval":
+        _cmd_eval(args)
+    elif command in ("ask", "investigate"):
+        _cmd_ask(args)
     elif command in ("install-hooks", "setup"):
         _cmd_install_hooks()
     elif command == "search" or command == "s":
@@ -96,7 +110,7 @@ def _run(argv: list[str] | None = None) -> None:
         _cmd_search(args)
 
     # Non-blocking update check (once per day)
-    from claude_code_recall.updater import check_for_update
+    from code_recall.updater import check_for_update
 
     check_for_update(quiet=args.quiet or args.json_output or command == "update")
 
@@ -107,10 +121,15 @@ def _first_run_setup(args: argparse.Namespace) -> None:
     show_output = not args.quiet and not args.json_output
 
     if is_first_run and show_output:
-        print("Welcome to claude-code-recall! Setting up...\n", file=sys.stderr)
+        print("Welcome to code-recall! Setting up...\n", file=sys.stderr)
 
     # Auto-index (silent on subsequent runs — takes <1s)
-    ensure_index(args.claude_dir, args.db, verbose=is_first_run and show_output)
+    ensure_index(
+        args.claude_dir,
+        args.db,
+        codex_dir=args.codex_dir,
+        verbose=is_first_run and show_output,
+    )
 
     # Auto-install hooks on first run
     if is_first_run and not HOOKS_MARKER.exists():
@@ -119,7 +138,7 @@ def _first_run_setup(args: argparse.Namespace) -> None:
 
 def _auto_install_hooks() -> None:
     """Silently install SessionEnd hooks on first run."""
-    from claude_code_recall.config import load_config
+    from code_recall.config import load_config
 
     if not load_config().get("auto_index_hook", True):
         return
@@ -127,11 +146,11 @@ def _auto_install_hooks() -> None:
     import shutil
 
     settings_path = Path.home() / ".claude" / "settings.json"
-    claude_code_recall_bin = shutil.which(COMMAND_NAME)
-    if not claude_code_recall_bin:
+    code_recall_bin = shutil.which(COMMAND_NAME)
+    if not code_recall_bin:
         return
 
-    hook_command = f"{claude_code_recall_bin} index --quiet"
+    hook_command = f"{code_recall_bin} index --quiet"
     desired_hook = _index_hook_config(hook_command)
 
     settings = {}
@@ -183,7 +202,7 @@ def _auto_install_hooks() -> None:
 
 def _cmd_config(args: argparse.Namespace) -> None:
     """View or set config values."""
-    from claude_code_recall.config import print_config, set_value
+    from code_recall.config import print_config, set_value
 
     config_args = args.query[1:]  # strip "config"
     if len(config_args) >= 2:
@@ -199,15 +218,147 @@ def _cmd_config(args: argparse.Namespace) -> None:
 
 def _cmd_update(args: argparse.Namespace) -> None:
     """Check for and optionally install the latest release."""
-    from claude_code_recall.updater import run_update
+    from code_recall.updater import run_update
 
     code = run_update(yes=args.yes, quiet=args.quiet)
     if code:
         sys.exit(code)
 
 
+def _cmd_ask(args: argparse.Namespace) -> None:
+    """Answer a natural-language question using indexed sessions as evidence."""
+    from code_recall.agentic import answer_query
+    from code_recall.config import load_config
+
+    ask_args = args.query[1:]  # strip "ask" / "investigate"
+    query = " ".join(ask_args).strip()
+    if not query:
+        print("Usage: code-recall ask <question>", file=sys.stderr)
+        sys.exit(1)
+
+    _first_run_setup(args)
+
+    config = load_config()
+    limit = args.limit if args.limit is not None else max(config.get("limit", 10), 8)
+    semantic = None
+    if args.semantic:
+        semantic = True
+    elif args.no_semantic or config["search_mode"] == "keyword":
+        semantic = False
+
+    results = search(
+        query=query,
+        db_path=args.db,
+        limit=limit,
+        project_filter=args.project,
+        after=args.after,
+        before=args.before,
+        semantic=semantic,
+        min_messages=args.min_messages,
+    )
+    answer = answer_query(
+        query=query,
+        results=results,
+        db_path=args.db,
+        model=args.ai_model,
+        timeout=args.ai_timeout,
+        max_sessions=min(limit, 12),
+        use_read_tools=not args.no_ai_tools,
+    )
+
+    if args.json_output:
+        json.dump(answer.to_dict(), sys.stdout, indent=2)
+        print()
+        return
+
+    print(answer.answer)
+    if answer.error:
+        print(f"\nError: {answer.error}", file=sys.stderr)
+    if answer.sources:
+        print("\nSources:")
+        for source in answer.sources[:8]:
+            print(
+                f"  {source.rank}. {source.title} "
+                f"({source.activity}, score {source.score:.0%})"
+            )
+            print(f"     {source.project_path}")
+            print(f"     {source.resume_command}")
+
+
+def _cmd_eval(args: argparse.Namespace) -> None:
+    """Run search recall eval cases from a JSON file."""
+    from code_recall.eval import (
+        generate_eval_cases,
+        load_eval_cases,
+        run_eval_cases,
+        write_eval_cases,
+    )
+
+    eval_args = args.query[1:]  # strip "eval"
+    if not eval_args:
+        print(
+            "Usage: code-recall eval <cases.json>\n"
+            "       code-recall eval generate <output.json> [limit]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if eval_args[0] == "generate":
+        output = Path(eval_args[1]) if len(eval_args) >= 2 else app_data_dir() / "eval-cases.json"
+        limit = int(eval_args[2]) if len(eval_args) >= 3 else (args.limit or 30)
+        _first_run_setup(args)
+        cases = generate_eval_cases(args.db, limit=limit, min_messages=args.min_messages)
+        write_eval_cases(cases, output)
+        print(f"Wrote {len(cases)} eval cases to {output}")
+        return
+
+    cases_path = Path(eval_args[0])
+    if not cases_path.exists():
+        print(f"Eval file not found: {cases_path}", file=sys.stderr)
+        sys.exit(1)
+
+    _first_run_setup(args)
+
+    semantic = None
+    if args.semantic:
+        semantic = True
+    elif args.no_semantic:
+        semantic = False
+
+    report = run_eval_cases(
+        load_eval_cases(cases_path),
+        db_path=args.db,
+        limit=args.limit,
+        semantic=semantic,
+    )
+
+    if args.json_output:
+        json.dump(report, sys.stdout, indent=2)
+        print()
+        if report["passed"] != report["total"]:
+            sys.exit(1)
+        return
+
+    print(
+        f"Search recall eval: {report['passed']}/{report['total']} "
+        f"({report['accuracy']:.0%})"
+    )
+    for case in report["cases"]:
+        marker = "PASS" if case["ok"] else "FAIL"
+        print(f"{marker}  {case['query']}")
+        for result in case["results"][:3]:
+            print(
+                f"  {result['rank']}. {result['summary'] or 'Untitled'} "
+                f"({result['score']:.0%})"
+            )
+            print(f"     {result['project_path']} :: {result['session_id']}")
+
+    if report["passed"] != report["total"]:
+        sys.exit(1)
+
+
 def _cmd_search(args: argparse.Namespace) -> None:
-    from claude_code_recall.config import load_config
+    from code_recall.config import load_config
 
     config = load_config()
     query = " ".join(args.query)
@@ -231,7 +382,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
     # No query + interactive terminal → open TUI for browsing
     if not query and sys.stdout.isatty():
         try:
-            from claude_code_recall.tui import run_tui
+            from code_recall.tui import run_tui
 
             run_tui("", [], db_path=args.db)
             return
@@ -239,8 +390,8 @@ def _cmd_search(args: argparse.Namespace) -> None:
             pass
 
     if not query:
-        print("Usage: claude-code-recall <query>", file=sys.stderr)
-        print('  Example: claude-code-recall "debugging auth middleware"', file=sys.stderr)
+        print("Usage: code-recall <query>", file=sys.stderr)
+        print('  Example: code-recall "debugging auth middleware"', file=sys.stderr)
         sys.exit(1)
 
     results = search(
@@ -261,7 +412,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
     # TUI if available and not disabled
     if not args.no_tui and sys.stdout.isatty():
         try:
-            from claude_code_recall.tui import run_tui
+            from code_recall.tui import run_tui
 
             run_tui(query, results, db_path=args.db)
             return
@@ -299,17 +450,17 @@ def _print_plain(query: str, results: list) -> None:
             meta_parts.append(format_size(s.file_size))
         print(f"     {' · '.join(meta_parts)}")
 
-        # Show last activity if different from title
+        # Show last activity and the best retrieval clue when available.
         if s.last_prompt and s.last_prompt != s.first_prompt:
             last = clean_display_text(s.last_prompt)
             if last:
                 print(f"     Last: {last[:120]}")
-        elif r.snippets:
+        if r.snippets:
             snippet = clean_display_text(r.snippets[0])
             if snippet:
                 print(f"     > {snippet[:120]}")
 
-        print(f"     Resume: cd {r.display_project} && claude --resume {s.session_id}")
+        print(f"     Resume: cd {r.display_project} && {r.resume_command}")
         print()
 
 
@@ -320,6 +471,8 @@ def _print_json(results: list) -> None:
         s = r.session
         output.append({
             "session_id": s.session_id,
+            "provider": s.provider,
+            "provider_session_id": s.provider_session_id,
             "project_path": s.project_path,
             "summary": s.summary,
             "first_prompt": s.first_prompt,
@@ -329,6 +482,7 @@ def _print_json(results: list) -> None:
             "file_size": s.file_size,
             "modified": s.modified,
             "last_activity": s.last_activity,
+            "model": s.model,
             "score": round(r.score, 4),
             "fts_rank": r.fts_rank,
             "vec_score": round(r.vec_score, 4) if r.vec_score is not None else None,
@@ -345,13 +499,14 @@ def _cmd_index(args: argparse.Namespace) -> None:
 
     # Pre-download models during explicit index (not during search)
     try:
-        from claude_code_recall.embedder import ensure_models_downloaded
+        from code_recall.embedder import ensure_models_downloaded
         ensure_models_downloaded()
     except Exception:
         pass
 
     stats = build_index(
         projects_dir=args.claude_dir,
+        codex_dir=args.codex_dir,
         db_path=args.db,
         force=args.force,
         verbose=not args.quiet,
@@ -367,13 +522,16 @@ def _cmd_index(args: argparse.Namespace) -> None:
 
 def _cmd_info(args: argparse.Namespace) -> None:
     if not args.db.exists():
-        print("No index found. Run 'claude-code-recall' to build it.")
+        print("No index found. Run 'code-recall' to build it.")
         return
 
     conn = get_connection(args.db)
     stats = get_stats(conn)
 
     chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    provider_rows = conn.execute(
+        "SELECT provider, COUNT(*) AS count FROM sessions GROUP BY provider ORDER BY provider"
+    ).fetchall()
 
     # Graph stats
     try:
@@ -385,7 +543,7 @@ def _cmd_info(args: argparse.Namespace) -> None:
 
     conn.close()
 
-    print(f"claude-code-recall v{__version__}")
+    print(f"code-recall v{__version__}")
     print(f"  Database: {args.db}")
     print(f"  Size: {format_size(args.db.stat().st_size)}")
     print(
@@ -393,6 +551,9 @@ def _cmd_info(args: argparse.Namespace) -> None:
         f"({stats.get('main_sessions', 0)} main, "
         f"{stats.get('subagent_sessions', 0)} subagent)"
     )
+    if provider_rows:
+        providers = ", ".join(f"{row['provider']}: {row['count']}" for row in provider_rows)
+        print(f"  Providers: {providers}")
     print(f"  Chunks: {chunk_count}")
     print(f"  Projects: {stats.get('projects', 0)}")
     print(f"  Messages: {stats.get('total_messages', 0)}")
@@ -403,10 +564,10 @@ def _cmd_info(args: argparse.Namespace) -> None:
         f"{format_date(stats.get('latest'))}"
     )
 
-    from claude_code_recall import has_semantic, has_tui
+    from code_recall import has_semantic, has_tui
 
-    sem = "enabled" if has_semantic() else "not installed (pip install claude-code-recall[semantic])"
-    tui = "enabled" if has_tui() else "not installed (pip install claude-code-recall[tui])"
+    sem = "enabled" if has_semantic() else "not installed (pip install code-recall[semantic])"
+    tui = "enabled" if has_tui() else "not installed (pip install code-recall[tui])"
     print(f"  Semantic: {sem}")
     print(f"  TUI: {tui}")
 
@@ -417,7 +578,7 @@ def _cmd_gc(args: argparse.Namespace) -> None:
         print("No index found.")
         return
 
-    from claude_code_recall.db import delete_session
+    from code_recall.db import delete_session
 
     conn = get_connection(args.db)
     rows = conn.execute("SELECT session_id, file_path FROM sessions").fetchall()
@@ -438,13 +599,13 @@ def _cmd_install_hooks() -> None:
     import shutil
 
     settings_path = Path.home() / ".claude" / "settings.json"
-    claude_code_recall_bin = shutil.which(COMMAND_NAME)
+    code_recall_bin = shutil.which(COMMAND_NAME)
 
-    if not claude_code_recall_bin:
+    if not code_recall_bin:
         print(f"Warning: '{COMMAND_NAME}' not found in PATH.")
-        claude_code_recall_bin = COMMAND_NAME
+        code_recall_bin = COMMAND_NAME
 
-    hook_command = f"{claude_code_recall_bin} index --quiet"
+    hook_command = f"{code_recall_bin} index --quiet"
     desired_hook = _index_hook_config(hook_command)
 
     settings = {}
@@ -501,7 +662,7 @@ def _index_hook_config(command: str) -> dict:
 
 
 def _hook_mentions_app(command: str) -> bool:
-    return COMMAND_NAME in command or LEGACY_COMMAND_NAME in command
+    return COMMAND_NAME in command or any(name in command for name in LEGACY_COMMAND_NAMES)
 
 
 if __name__ == "__main__":

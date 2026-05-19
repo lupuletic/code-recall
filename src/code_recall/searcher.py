@@ -1,4 +1,4 @@
-"""Search engine for claude-code-recall."""
+"""Search engine for code-recall."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import math
 import sqlite3
 from pathlib import Path
 
-from claude_code_recall.db import DB_PATH, get_connection, get_related_sessions, has_vec_table
-from claude_code_recall.models import SearchResult, Session
+from code_recall.db import DB_PATH, get_connection, get_related_sessions, has_vec_table
+from code_recall.models import SearchResult, Session
 
 
 def _should_show_subagents() -> bool:
     """Check config to determine if subagent sessions should be shown."""
-    from claude_code_recall.config import load_config
+    from code_recall.config import load_config
 
     return load_config().get("show_subagents", False)
 
@@ -62,7 +62,7 @@ def search(
     if not query or not query.strip():
         return []
 
-    from claude_code_recall.logger import Timer, get_logger
+    from code_recall.logger import Timer, get_logger
 
     log = get_logger()
     log.debug(f"search: query='{query}' limit={limit} project={project_filter} semantic={semantic}")
@@ -140,7 +140,7 @@ def _search_pipeline(
     conn, query, limit, project_filter, after, before, semantic, min_messages,
 ) -> list[SearchResult]:
     """Core search pipeline. Connection managed by caller."""
-    from claude_code_recall.logger import Timer, get_logger
+    from code_recall.logger import Timer, get_logger
 
     log = get_logger()
 
@@ -180,7 +180,7 @@ def _search_pipeline(
     use_semantic = semantic if semantic is not None else has_vec_table(conn)
     if use_semantic:
         try:
-            from claude_code_recall.embedder import get_embedder
+            from code_recall.embedder import get_embedder
 
             if get_embedder() is None:
                 use_semantic = False
@@ -267,8 +267,9 @@ def _search_pipeline(
         return fts_results[:limit]
 
     # Phase 3: Semantic search
+    semantic_fetch = max(limit * 8, 60)
     with Timer("semantic search", log):
-        vec_results = _vec_search(conn, query, limit * 3, project_filter, after, before, min_messages)
+        vec_results = _vec_search(conn, query, semantic_fetch, project_filter, after, before, min_messages)
 
     log.debug(f"FTS: {len(fts_results)} results, graph: {len(graph_results)}, semantic: {use_semantic}")
 
@@ -286,11 +287,12 @@ def _search_pipeline(
     )
 
     # Phase 5: Cross-encoder reranking
+    rerank_fetch = max(limit * 4, 30)
     with Timer("cross-encoder rerank", log):
-        combined = _cross_encoder_rerank(query, combined[:limit * 2])
+        combined = _cross_encoder_rerank(query, combined[:rerank_fetch])
 
     # Phase 6: LLM reranking — only when explicitly set to "llm" mode
-    from claude_code_recall.config import load_config
+    from code_recall.config import load_config
 
     config = load_config()
     if config.get("search_mode") == "llm" and combined:
@@ -582,8 +584,8 @@ def _vec_search(
 ) -> list[SearchResult]:
     """Vector similarity search using sqlite-vec."""
     try:
-        from claude_code_recall.db import load_vec_extension
-        from claude_code_recall.embedder import get_embedder
+        from code_recall.db import load_vec_extension
+        from code_recall.embedder import get_embedder
 
         if not load_vec_extension(conn):
             return []
@@ -746,7 +748,7 @@ def _graph_search(
 
     # Project path matches are often the strongest clue for vague recall.
     for row in rows:
-        path = (row["project_path"] or "").lower()
+        path = _searchable_project_name(row["project_path"] or "").lower()
         if not path:
             continue
         term_matches = sum(1 for t in terms if t in path)
@@ -790,15 +792,17 @@ def _graph_search(
         params,
     ).fetchall()
     for row in file_rows:
+        file_path = row["matched_file_path"] or ""
+        searchable_path = _project_relative_path(file_path, row["project_path"] or "")
         score, matched = matched_text_score(
-            row["matched_file_path"] or "",
+            searchable_path,
             row["matched_file_name"] or "",
         )
         if matched:
             add(
                 row,
                 score + 0.4,
-                f"{row['matched_file_action'].title()}ed: {row['matched_file_path']}",
+                f"{_format_file_action(row['matched_file_action'])}: {row['matched_file_path']}",
             )
 
     command_rows = conn.execute(
@@ -1129,7 +1133,7 @@ def _cross_encoder_rerank(query: str, results: list[SearchResult]) -> list[Searc
         return results
 
     try:
-        from claude_code_recall.embedder import get_reranker
+        from code_recall.embedder import get_reranker
 
         reranker = get_reranker()
         if reranker is None:
@@ -1193,7 +1197,7 @@ def _cross_encoder_rerank(query: str, results: list[SearchResult]) -> list[Searc
     # Drop results that are clearly irrelevant compared to the top result
     # BUT keep results from the same project (they're likely related sessions)
     if len(reranked) >= 2 and reranked[0].score > 0.5:
-        from claude_code_recall.config import load_config
+        from code_recall.config import load_config
 
         cutoff_pct = load_config().get("relevance_cutoff", 0.4)
         top_project = reranked[0].session.project_dir
@@ -1207,15 +1211,15 @@ def _cross_encoder_rerank(query: str, results: list[SearchResult]) -> list[Searc
 
 
 def _llm_rerank(query: str, results: list[SearchResult]) -> list[SearchResult]:
-    """Rerank using Claude via `claude -p` for highest quality results."""
+    """Rerank using an available assistant CLI for highest quality results."""
     if not results:
         return results
 
     import sys
 
-    print("  Reranking with Claude...", end="", file=sys.stderr, flush=True)
+    print("  Reranking with AI...", end="", file=sys.stderr, flush=True)
 
-    from claude_code_recall.llm_reranker import llm_rerank
+    from code_recall.llm_reranker import llm_rerank
 
     candidates = []
     for r in results:
@@ -1259,31 +1263,35 @@ def _file_search(
         params.append(f"%{project_filter}%")
 
     extra_where = "AND " + " AND ".join(where_parts) if where_parts else ""
-    params.append(limit)
+    params.append(limit * 5)
 
     rows = conn.execute(f"""
-        SELECT DISTINCT sf.session_id, sf.file_path, sf.action, s.*
+        SELECT sf.session_id, sf.file_path, sf.action, s.*
         FROM session_files sf
         JOIN sessions s ON s.session_id = sf.session_id
         WHERE (sf.file_name LIKE ? OR sf.file_path LIKE ?)
         {extra_where}
-        ORDER BY s.modified DESC
+        ORDER BY CASE sf.action WHEN 'edit' THEN 0 ELSE 1 END, s.modified DESC
         LIMIT ?
     """, params).fetchall()
 
     results = []
+    seen: set[str] = set()
     for row in rows:
+        if row["session_id"] in seen:
+            continue
+        seen.add(row["session_id"])
         session = _row_to_session(row)
         results.append(SearchResult(
             session=session,
             score=1.0,
-            snippets=[f"{row['action'].title()}ed: {row['file_path']}"],
+            snippets=[f"{_format_file_action(row['action'])}: {row['file_path']}"],
         ))
 
     # Normalize scores by recency
     for i, r in enumerate(results):
         r.score = 1.0 - (i / max(len(results), 1))
-    return results
+    return results[:limit]
 
 
 def _command_search(
@@ -1422,10 +1430,37 @@ def _prepare_fts_query(query: str, use_prefix: bool = True) -> str:
     return " AND ".join(parts)
 
 
+def _format_file_action(action: str | None) -> str:
+    """Human-readable label for normalized file actions."""
+    if action == "edit":
+        return "Edited"
+    if action == "read":
+        return "Read"
+    return (action or "Touched").title()
+
+
+def _project_relative_path(file_path: str, project_path: str) -> str:
+    """Return a path string suitable for graph matching.
+
+    Absolute workspace prefixes are low-signal and otherwise make generic
+    project names dominate file matching once per touched file.
+    """
+    if project_path and file_path.startswith(project_path.rstrip("/") + "/"):
+        return file_path[len(project_path.rstrip("/")) + 1:]
+    return Path(file_path).name or file_path
+
+
+def _searchable_project_name(project_path: str) -> str:
+    """Return the project component used for graph path matching."""
+    return Path(project_path.rstrip("/")).name or project_path
+
+
 def _row_to_session(row: sqlite3.Row) -> Session:
     """Convert a database row to a Session object."""
     return Session(
         session_id=row["session_id"],
+        provider=row["provider"] if "provider" in row.keys() else "claude",
+        provider_session_id=row["provider_session_id"] if "provider_session_id" in row.keys() else row["session_id"],
         project_path=row["project_path"],
         project_dir=row["project_dir"],
         file_path=row["file_path"],
@@ -1447,6 +1482,7 @@ def _row_to_session(row: sqlite3.Row) -> Session:
         files_modified=row["files_modified"] if "files_modified" in row.keys() else None,
         commands_run=row["commands_run"] if "commands_run" in row.keys() else None,
         git_branch_detected=row["git_branch_detected"] if "git_branch_detected" in row.keys() else None,
+        model=row["model"] if "model" in row.keys() else None,
     )
 
 
