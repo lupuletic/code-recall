@@ -43,6 +43,18 @@ code-recall indexes Claude Code and Codex sessions, ranks results with keyword s
 - Keep the index fresh with quick incremental indexing and Claude Code session-end hooks.
 - Stay local-first: your SQLite index and transcript reads stay on your machine.
 
+## Screenshots
+
+Generated from synthetic demo data via [scripts/generate_demo_assets.py](scripts/generate_demo_assets.py) — not from a real index.
+
+| Search across providers | Why this matched |
+|---|---|
+| <img src="docs/assets/code-recall-search.svg" alt="Search results across Claude Code and Codex" width="440"> | <img src="docs/assets/code-recall-why.svg" alt="Why panel showing matched evidence" width="440"> |
+
+<p align="center">
+  <img src="docs/assets/code-recall-ai-chat.svg" alt="Chat with a selected transcript" width="880">
+</p>
+
 ## Install
 
 <details open>

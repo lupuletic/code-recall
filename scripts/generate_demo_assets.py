@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from rich.console import Console
+from rich.terminal_theme import SVG_EXPORT_THEME
 
 from code_recall.db import (
     build_session_chains,
@@ -337,7 +341,44 @@ async def _render_screenshot(
                 assistant_label="Claude Code",
             )
             await pilot.pause()
-        app.save_screenshot(filename=filename, path=str(asset_dir))
+        _export_svg_with_theme(app, asset_dir / filename)
+
+
+# Remap from Rich's DEFAULT_TERMINAL_THEME palette (pure ANSI: harsh #00ffff
+# cyan, #ff00ff magenta) to SVG_EXPORT_THEME palette (softer monokai-style)
+# so README screenshots look like a real iTerm/Ghostty rendering. We post-
+# process because Textual's compositor resolves ANSI->RGB before Rich's SVG
+# theme parameter would take effect.
+_ANSI_TO_SVG_THEME_MAP = {
+    "#000000": "#4b4e55", "#800000": "#cc555a", "#008000": "#98a84b",
+    "#808000": "#d0b344", "#000080": "#608ab1", "#800080": "#98729f",
+    "#008080": "#68a0b3", "#c0c0c0": "#c5c8c6", "#808080": "#9a9b99",
+    "#ff0000": "#ff2627", "#00ff00": "#00823d", "#ffff00": "#d08442",
+    "#0000ff": "#1984e9", "#ff00ff": "#ff2c7a", "#00ffff": "#398280",
+    "#ffffff": "#fdfdc5",
+}
+
+
+def _export_svg_with_theme(app: RecallApp, svg_path: Path) -> None:
+    width, height = app.size
+    console = Console(
+        width=width,
+        height=height,
+        file=io.StringIO(),
+        force_terminal=True,
+        color_system="truecolor",
+        record=True,
+        legacy_windows=False,
+        safe_box=False,
+    )
+    screen_render = app.screen._compositor.render_update(
+        full=True, screen_stack=app._background_screens, simplify=False,
+    )
+    console.print(screen_render)
+    svg = console.export_svg(title=app.title, theme=SVG_EXPORT_THEME)
+    for harsh, soft in _ANSI_TO_SVG_THEME_MAP.items():
+        svg = svg.replace(harsh, soft)
+    svg_path.write_text(svg, encoding="utf-8")
 
 
 async def render_assets(asset_dir: Path) -> None:
