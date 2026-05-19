@@ -14,7 +14,8 @@ _reranker_instance = None
 class Embedder:
     """Wrapper around FastEmbed for generating text embeddings."""
 
-    MODEL = "BAAI/bge-small-en-v1.5"  # 33MB, 384 dimensions, ONNX
+    MODEL = "nomic-ai/nomic-embed-text-v1.5-Q"  # 130MB, 768d, 8K context, ONNX
+    DIM = 768
 
     def __init__(self):
         from fastembed import TextEmbedding
@@ -22,12 +23,14 @@ class Embedder:
         self._model = TextEmbedding(model_name=self.MODEL)
 
     def embed(self, texts: list[str]) -> list["np.ndarray"]:
-        """Embed a batch of texts. Returns list of numpy arrays."""
-        return list(self._model.embed(texts))
+        """Embed a batch of documents (uses model's passage prefix)."""
+        # Cast to float32 — nomic returns float64, sqlite-vec stores float32.
+        return [arr.astype("float32", copy=False) for arr in self._model.passage_embed(texts)]
 
     def embed_single(self, text: str) -> "np.ndarray":
-        """Embed a single text string."""
-        return list(self._model.embed([text]))[0]
+        """Embed a single query (uses model's query prefix)."""
+        arr = list(self._model.query_embed([text]))[0]
+        return arr.astype("float32", copy=False)
 
 
 class Reranker:
@@ -37,7 +40,7 @@ class Reranker:
     cross-attention — much more accurate than bi-encoder similarity.
     """
 
-    MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"  # 80MB, 18ms for 20 docs
+    MODEL = "jinaai/jina-reranker-v1-tiny-en"  # 130MB, 8K context, ONNX
 
     def __init__(self):
         from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -52,7 +55,6 @@ class Reranker:
         Returns list of (original_index, score) sorted by score descending.
         """
         scores = list(self._model.rerank(query, documents))
-        # scores is a list of floats, one per document in original order
         indexed_scores = list(enumerate(scores))
         indexed_scores.sort(key=lambda x: x[1], reverse=True)
         return indexed_scores
@@ -85,15 +87,13 @@ def get_reranker(allow_download: bool = False) -> Reranker | None:
         return _reranker_instance
 
     if not allow_download:
-        # Check if model is already cached before loading
         try:
             from fastembed.common.utils import define_cache_dir
 
             cache = define_cache_dir()
-            # Look for the model in cache
-            model_dirs = list(cache.glob("*ms-marco*MiniLM*"))
+            model_dirs = list(cache.glob("*jina-reranker*tiny*"))
             if not model_dirs:
-                return None  # Not downloaded yet — skip reranking
+                return None
         except Exception:
             pass
 

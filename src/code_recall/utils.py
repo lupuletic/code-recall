@@ -805,7 +805,7 @@ def _dedupe(values: list[str]) -> list[str]:
 # Chunk configuration
 CHUNK_SIZE = 5  # messages per chunk
 CHUNK_OVERLAP = 1  # overlapping messages between chunks
-MAX_CHUNK_CHARS = 2000  # max chars per chunk text
+MAX_CHUNK_CHARS = 8000  # max chars per chunk (~2K tokens, well under embedder's 8K limit)
 
 
 def _build_fts_text(

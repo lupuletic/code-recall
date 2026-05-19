@@ -448,13 +448,26 @@ def setup_vec_table(conn: sqlite3.Connection) -> None:
     """Create the vector table for semantic search. Requires sqlite-vec."""
     if not load_vec_extension(conn):
         return
+
+    # Dim is sourced from the active embedder so the table and embeddings
+    # stay in lockstep when the model changes. If an existing chunks_vec
+    # table has the wrong dim, drop it — the indexer will re-embed all
+    # chunks on the next run.
+    from code_recall.embedder import Embedder
+
+    dim = Embedder.DIM
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+    ).fetchone()
+    if row and row[0] and f"float[{dim}]" not in row[0]:
+        conn.execute("DROP TABLE chunks_vec")
+
     conn.execute(
-        """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
+        f"""CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
             chunk_rowid INTEGER PRIMARY KEY,
-            embedding float[384] distance_metric=cosine
+            embedding float[{dim}] distance_metric=cosine
         )"""
     )
-    # Drop old sessions_vec if migrating from v1
     try:
         conn.execute("DROP TABLE IF EXISTS sessions_vec")
     except Exception:
