@@ -445,9 +445,6 @@ def _generate_embeddings(
     if not rows:
         return 0
 
-    if verbose:
-        print(f"\n  Generating embeddings for {len(rows)} chunks...", file=sys.stderr)
-
     # Prepare texts and IDs
     texts = [row["chunk_text"] for row in rows if row["chunk_text"].strip()]
     chunk_ids = [row["chunk_id"] for row in rows if row["chunk_text"].strip()]
@@ -455,23 +452,51 @@ def _generate_embeddings(
     if not texts:
         return 0
 
-    # Batch embed
-    embeddings = embedder.embed(texts)
+    # Embed in mini-batches so the user sees steady progress; one giant
+    # batched call produces a long silent stretch on heavier models.
+    batch_size = 64
+    use_tqdm = verbose and sys.stderr.isatty()
+    progress = None
+    if use_tqdm:
+        try:
+            from tqdm import tqdm
 
-    # Store in vec table with periodic commits
-    for i, (chunk_id, embedding) in enumerate(zip(chunk_ids, embeddings)):
-        conn.execute(
-            "INSERT OR REPLACE INTO chunks_vec (chunk_rowid, embedding) VALUES (?, ?)",
-            (chunk_id, embedding.tobytes()),
-        )
-        if (i + 1) % 50 == 0:
-            conn.commit()
-            if verbose:
-                print(
-                    f"\r  Embedded {i + 1}/{len(chunk_ids)} chunks...",
-                    end="",
-                    file=sys.stderr,
-                )
+            progress = tqdm(
+                total=len(texts),
+                unit="chunk",
+                desc="  Embedding",
+                file=sys.stderr,
+                leave=True,
+            )
+        except ImportError:
+            progress = None
+    elif verbose:
+        print(f"\n  Generating embeddings for {len(texts)} chunks...", file=sys.stderr)
 
-    conn.commit()
+    embedded = 0
+    for start in range(0, len(texts), batch_size):
+        batch_texts = texts[start : start + batch_size]
+        batch_ids = chunk_ids[start : start + batch_size]
+        batch_embeddings = embedder.embed(batch_texts)
+        for chunk_id, embedding in zip(batch_ids, batch_embeddings):
+            conn.execute(
+                "INSERT OR REPLACE INTO chunks_vec (chunk_rowid, embedding) VALUES (?, ?)",
+                (chunk_id, embedding.tobytes()),
+            )
+            embedded += 1
+        conn.commit()
+        if progress is not None:
+            progress.update(len(batch_texts))
+        elif verbose:
+            print(
+                f"\r  Embedded {embedded}/{len(texts)} chunks...",
+                end="",
+                file=sys.stderr,
+            )
+
+    if progress is not None:
+        progress.close()
+    elif verbose:
+        print(file=sys.stderr)
+
     return len(chunk_ids)

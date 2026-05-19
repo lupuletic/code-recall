@@ -12,7 +12,9 @@ from functools import partial
 from pathlib import Path
 from typing import Iterable
 
+from rich.errors import MarkupError
 from rich.markup import escape
+from rich.text import Text
 from textual import events, on, work
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
@@ -35,6 +37,20 @@ from textual.widgets.option_list import Option
 from code_recall import __version__
 from code_recall.models import SearchResult
 from code_recall.utils import clean_display_text, format_date, format_size
+
+
+def _safe_markup(content: str) -> str:
+    """Validate Rich markup; if it fails to parse, fall back to plain text.
+
+    Defends the TUI against unbalanced bracket sequences in user data
+    (e.g. a session prompt containing literal ``[/dim]``) that would
+    otherwise crash the render pipeline.
+    """
+    try:
+        Text.from_markup(content)
+        return content
+    except MarkupError:
+        return escape(content)
 
 
 @dataclass(frozen=True)
@@ -242,12 +258,14 @@ class SessionItem(ListItem):
         telemetry = f"[dim]{file_count} files · {cmd_count} cmds[/dim]" if file_count or cmd_count else "[dim]no files/cmds[/dim]"
 
         yield Static(
-            "\n".join(
-                [
-                    f"[bold]{self.rank:>2}[/bold] {_provider_badge(session.provider)} [bold]{title}[/bold]",
-                    f"   [{display.style}]{_score_label(self.result.score)} {score}[/{display.style}]  {meta}",
-                    f"   [green]why:[/green] {reason}   {telemetry}",
-                ]
+            _safe_markup(
+                "\n".join(
+                    [
+                        f"[bold]{self.rank:>2}[/bold] {_provider_badge(session.provider)} [bold]{title}[/bold]",
+                        f"   [{display.style}]{_score_label(self.result.score)} {score}[/{display.style}]  {meta}",
+                        f"   [green]why:[/green] {reason}   {telemetry}",
+                    ]
+                )
             ),
             markup=True,
         )
@@ -311,7 +329,7 @@ class DetailPanel(VerticalScroll):
 
     def render_empty(self, message: str) -> None:
         self.remove_children()
-        self.mount(Static(message, markup=True))
+        self.mount(Static(_safe_markup(message), markup=True))
         self.scroll_home(animate=False)
 
     def refresh_content(self) -> None:
@@ -327,7 +345,7 @@ class DetailPanel(VerticalScroll):
             return
 
         self.remove_children()
-        self.mount(Static(self._content(), markup=True))
+        self.mount(Static(_safe_markup(self._content()), markup=True))
         self.scroll_home(animate=False)
 
     def _tab_line(self) -> str:
