@@ -448,13 +448,24 @@ def setup_vec_table(conn: sqlite3.Connection) -> None:
     """Create the vector table for semantic search. Requires sqlite-vec."""
     if not load_vec_extension(conn):
         return
+
+    # Dim is sourced from the active embedder so the table and embeddings
+    # stay in lockstep when the model changes. If an existing chunks_vec
+    # table has the wrong dim, drop it — the indexer will re-embed all
+    # chunks on the next run.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+    ).fetchone()
+    if row and not _chunks_vec_uses_current_dim(row["sql"]):
+        conn.execute("DROP TABLE chunks_vec")
+
+    dim = _current_embedding_dim()
     conn.execute(
-        """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
+        f"""CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
             chunk_rowid INTEGER PRIMARY KEY,
-            embedding float[384] distance_metric=cosine
+            embedding float[{dim}] distance_metric=cosine
         )"""
     )
-    # Drop old sessions_vec if migrating from v1
     try:
         conn.execute("DROP TABLE IF EXISTS sessions_vec")
     except Exception:
@@ -462,9 +473,23 @@ def setup_vec_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _current_embedding_dim() -> int:
+    """Return the active embedding dimension without loading model weights."""
+    from code_recall.embedder import Embedder
+
+    return Embedder.DIM
+
+
+def _chunks_vec_uses_current_dim(sql: str | None) -> bool:
+    """Return whether an existing chunks_vec table matches the active embedder."""
+    if not sql:
+        return False
+    return f"float[{_current_embedding_dim()}]" in sql
+
+
 def has_vec_table(conn: sqlite3.Connection) -> bool:
-    """Check if the vector table exists."""
+    """Check if the vector table exists and matches the active embedder."""
     row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
     ).fetchone()
-    return row is not None
+    return row is not None and _chunks_vec_uses_current_dim(row["sql"])
