@@ -15,6 +15,7 @@ from code_recall.db import (
     get_related_sessions,
     get_session_mtime,
     get_stats,
+    has_vec_table,
     upsert_chunks,
     upsert_graph_edges,
     upsert_session,
@@ -163,6 +164,19 @@ class TestSchema:
         assert "provider_session_id" in cols
         assert index_row is not None
         assert version == "4"
+
+    def test_has_vec_table_rejects_old_embedding_dimension(self, db_conn):
+        """Search should not use stale vector tables from older embedder dims."""
+        db_conn.execute(
+            "CREATE TABLE chunks_vec (chunk_rowid INTEGER PRIMARY KEY, embedding float[384])"
+        )
+        assert not has_vec_table(db_conn)
+
+        db_conn.execute("DROP TABLE chunks_vec")
+        db_conn.execute(
+            "CREATE TABLE chunks_vec (chunk_rowid INTEGER PRIMARY KEY, embedding float[768])"
+        )
+        assert has_vec_table(db_conn)
 
     def test_chunks_columns(self, db_conn):
         cols = {

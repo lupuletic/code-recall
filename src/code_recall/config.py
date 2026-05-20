@@ -21,7 +21,7 @@ DEFAULTS = {
 SEARCH_MODES = {
     "keyword": "FTS5 keyword search only (fastest, no dependencies)",
     "hybrid": "Keyword + semantic + cross-encoder reranking (recommended)",
-    "llm": "Hybrid + Claude LLM reranking (best quality, ~10s)",
+    "llm": "Hybrid + assistant CLI reranking (best quality, slower)",
 }
 
 

@@ -382,59 +382,70 @@ def _export_svg_with_theme(app: RecallApp, svg_path: Path) -> None:
 
 
 async def render_assets(asset_dir: Path) -> None:
+    from code_recall import config as config_module
+
     asset_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="code-recall-demo-") as tmp:
-        db_path = Path(tmp) / "demo-index.db"
-        build_demo_db(db_path)
-        results = search(DEMO_QUERY, db_path=db_path, limit=10, semantic=False)
-        if not results:
-            raise RuntimeError(f"demo query returned no results: {DEMO_QUERY!r}")
+        tmp_path = Path(tmp)
+        original_config_path = config_module.CONFIG_PATH
+        config_module.CONFIG_PATH = tmp_path / "config.json"
+        demo_config = dict(config_module.DEFAULTS)
+        demo_config["search_mode"] = "hybrid"
+        config_module.save_config(demo_config)
+        try:
+            db_path = tmp_path / "demo-index.db"
+            build_demo_db(db_path)
+            results = search(DEMO_QUERY, db_path=db_path, limit=10, semantic=False)
+            if not results:
+                raise RuntimeError(f"demo query returned no results: {DEMO_QUERY!r}")
 
-        await _render_screenshot(
-            db_path=db_path,
-            results=results,
-            asset_dir=asset_dir,
-            filename="code-recall-search.svg",
-        )
-        await _render_screenshot(
-            db_path=db_path,
-            results=results,
-            asset_dir=asset_dir,
-            filename="code-recall-why.svg",
-            tab="why",
-        )
-        await _render_screenshot(
-            db_path=db_path,
-            results=results,
-            asset_dir=asset_dir,
-            filename="code-recall-activity.svg",
-            tab="activity",
-        )
-        await _render_screenshot(
-            db_path=db_path,
-            results=results,
-            asset_dir=asset_dir,
-            filename="code-recall-related.svg",
-            tab="related",
-        )
-        await _render_screenshot(
-            db_path=db_path,
-            results=results,
-            asset_dir=asset_dir,
-            filename="code-recall-ai-chat.svg",
-            tab="ai",
-            chat_messages=[
-                ("user", "What changed and what should I verify before resuming?"),
-                (
-                    "assistant",
-                    "Session demo-claude-001 switched Stripe verification to the raw request "
-                    "body, added timestamp tolerance, and covered valid, tampered, and replayed "
-                    "signatures. Resume with `claude --resume claude-demo-claude-001`, then run "
-                    "`pnpm test tests/webhooks/stripe-signature.test.ts` and the Stripe CLI "
-                    "forwarding command.",
-                ),
-            ],
-        )
+            await _render_screenshot(
+                db_path=db_path,
+                results=results,
+                asset_dir=asset_dir,
+                filename="code-recall-search.svg",
+            )
+            await _render_screenshot(
+                db_path=db_path,
+                results=results,
+                asset_dir=asset_dir,
+                filename="code-recall-why.svg",
+                tab="why",
+            )
+            await _render_screenshot(
+                db_path=db_path,
+                results=results,
+                asset_dir=asset_dir,
+                filename="code-recall-activity.svg",
+                tab="activity",
+            )
+            await _render_screenshot(
+                db_path=db_path,
+                results=results,
+                asset_dir=asset_dir,
+                filename="code-recall-related.svg",
+                tab="related",
+            )
+            await _render_screenshot(
+                db_path=db_path,
+                results=results,
+                asset_dir=asset_dir,
+                filename="code-recall-ai-chat.svg",
+                tab="ai",
+                chat_messages=[
+                    ("user", "What changed and what should I verify before resuming?"),
+                    (
+                        "assistant",
+                        "Session demo-claude-001 switched Stripe verification to the raw request "
+                        "body, added timestamp tolerance, and covered valid, tampered, and replayed "
+                        "signatures. Resume with `claude --resume claude-demo-claude-001`, then run "
+                        "`pnpm test tests/webhooks/stripe-signature.test.ts` and the Stripe CLI "
+                        "forwarding command.",
+                    ),
+                ],
+            )
+        finally:
+            config_module.CONFIG_PATH = original_config_path
 
 
 def _svg_to_png(svg_path: Path, png_path: Path) -> None:

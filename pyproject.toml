@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "code-recall"
-version = "0.2.2"
+version = "0.2.5"
 description = "Semantic search across local coding-agent sessions. Find past conversations by intent, not just keywords."
 readme = "README.md"
 license = "MIT"

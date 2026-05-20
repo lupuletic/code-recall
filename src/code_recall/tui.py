@@ -12,8 +12,6 @@ from functools import partial
 from pathlib import Path
 from typing import Iterable
 
-from rich.errors import MarkupError
-from rich.markup import escape
 from rich.text import Text
 from textual import events, on, work
 from textual.app import App, ComposeResult, SystemCommand
@@ -37,20 +35,6 @@ from textual.widgets.option_list import Option
 from code_recall import __version__
 from code_recall.models import SearchResult
 from code_recall.utils import clean_display_text, format_date, format_size
-
-
-def _safe_markup(content: str) -> str:
-    """Validate Rich markup; if it fails to parse, fall back to plain text.
-
-    Defends the TUI against unbalanced bracket sequences in user data
-    (e.g. a session prompt containing literal ``[/dim]``) that would
-    otherwise crash the render pipeline.
-    """
-    try:
-        Text.from_markup(content)
-        return content
-    except MarkupError:
-        return escape(content)
 
 
 @dataclass(frozen=True)
@@ -94,6 +78,18 @@ PROVIDERS = {
 }
 
 DETAIL_TABS = ("overview", "why", "activity", "related", "ai")
+
+
+def _append_line(text: Text, value: object = "", style: str | None = None) -> None:
+    text.append(str(value), style=style)
+    text.append("\n")
+
+
+def _append_label(text: Text, label: str, value: object, value_style: str | None = None) -> None:
+    text.append(label, style="bold")
+    text.append(" ")
+    text.append(str(value), style=value_style)
+    text.append("\n")
 
 
 def provider_display(provider: str | None) -> ProviderDisplay:
@@ -144,11 +140,6 @@ def _json_list(value: str | None) -> list[str]:
 def _activity(result: SearchResult) -> str:
     value = result.session.last_activity or result.session.modified or result.session.created
     return format_date(value) if value else "unknown"
-
-
-def _provider_badge(provider: str) -> str:
-    display = provider_display(provider)
-    return f"[{display.style}]{display.short_label}[/{display.style}]"
 
 
 def _assistant_label_for_session(provider: str | None) -> str:
@@ -240,35 +231,40 @@ class SessionItem(ListItem):
     def compose(self) -> ComposeResult:
         session = self.result.session
         display = provider_display(session.provider)
-        title = escape(_session_title(self.result, 92))
-        project = escape(self.result.display_project)
-        branch = escape(session.git_branch or session.git_branch_detected or "no branch")
-        model = f" · {escape(session.model)}" if session.model else ""
+        title = _session_title(self.result, 92)
+        project = self.result.display_project
+        branch = session.git_branch or session.git_branch_detected or "no branch"
+        model = f" · {session.model}" if session.model else ""
         activity = _activity(self.result)
-        reason = escape(_match_reason(self.result, self.query))
+        reason = _match_reason(self.result, self.query)
         score = f"{self.result.score:.0%}"
         file_count = len(_json_list(session.files_modified))
         cmd_count = len(_json_list(session.commands_run))
 
-        meta = (
-            f"[dim]{project} · {branch} · {activity} · "
-            f"{session.message_count} msgs · {format_size(session.file_size) if session.file_size else 'unknown size'}"
-            f"{model}[/dim]"
-        )
-        telemetry = f"[dim]{file_count} files · {cmd_count} cmds[/dim]" if file_count or cmd_count else "[dim]no files/cmds[/dim]"
-
-        yield Static(
-            _safe_markup(
-                "\n".join(
-                    [
-                        f"[bold]{self.rank:>2}[/bold] {_provider_badge(session.provider)} [bold]{title}[/bold]",
-                        f"   [{display.style}]{_score_label(self.result.score)} {score}[/{display.style}]  {meta}",
-                        f"   [green]why:[/green] {reason}   {telemetry}",
-                    ]
-                )
+        row = Text()
+        row.append(f"{self.rank:>2}", style="bold")
+        row.append(" ")
+        row.append(display.short_label, style=display.style)
+        row.append(" ")
+        row.append(title, style="bold")
+        row.append("\n   ")
+        row.append(f"{_score_label(self.result.score)} {score}", style=display.style)
+        row.append("  ")
+        row.append(
+            (
+                f"{project} · {branch} · {activity} · "
+                f"{session.message_count} msgs · "
+                f"{format_size(session.file_size) if session.file_size else 'unknown size'}"
+                f"{model}"
             ),
-            markup=True,
+            style="dim",
         )
+        row.append("\n   ")
+        row.append("why:", style="green")
+        row.append(f" {reason}   ")
+        row.append(f"{file_count} files · {cmd_count} cmds" if file_count or cmd_count else "no files/cmds", style="dim")
+
+        yield Static(row)
 
 
 class DetailPanel(VerticalScroll):
@@ -281,7 +277,7 @@ class DetailPanel(VerticalScroll):
         self.result: SearchResult | None = None
         self.query_text = ""
         self.db_path = None
-        self.ai_content: str | None = None
+        self.ai_content: Text | None = None
         self.ai_state = "idle"
         self.ai_assistant_label = "Auto"
 
@@ -300,15 +296,17 @@ class DetailPanel(VerticalScroll):
         self.active_tab = "ai"
         self.ai_state = "loading"
         self.ai_assistant_label = assistant_label
-        self.ai_content = (
-            f"[bold]AI investigation[/bold]\n"
-            f"[dim]Assistant provider:[/dim] {escape(assistant_label)}\n"
-            f"[dim]Question:[/dim] {escape(query)}\n\n"
-            "[dim]Reading indexed evidence and source transcripts...[/dim]"
-        )
+        content = Text()
+        _append_line(content, "AI investigation", "bold")
+        content.append("Assistant provider:", style="dim")
+        content.append(f" {assistant_label}\n")
+        content.append("Question:", style="dim")
+        content.append(f" {query}\n\n")
+        _append_line(content, "Reading indexed evidence and source transcripts...", "dim")
+        self.ai_content = content
         self.refresh_content()
 
-    def set_ai_answer(self, content: str, ok: bool = True, assistant_label: str = "Auto") -> None:
+    def set_ai_answer(self, content: Text, ok: bool = True, assistant_label: str = "Auto") -> None:
         self.active_tab = "ai"
         self.ai_state = "ready" if ok else "error"
         self.ai_assistant_label = assistant_label
@@ -327,9 +325,9 @@ class DetailPanel(VerticalScroll):
         self.ai_content = self._format_ai_chat(messages, busy)
         self.refresh_content()
 
-    def render_empty(self, message: str) -> None:
+    def render_empty(self, message: str | Text) -> None:
         self.remove_children()
-        self.mount(Static(_safe_markup(message), markup=True))
+        self.mount(Static(message, markup=isinstance(message, str)))
         self.scroll_home(animate=False)
 
     def refresh_content(self) -> None:
@@ -345,32 +343,32 @@ class DetailPanel(VerticalScroll):
             return
 
         self.remove_children()
-        self.mount(Static(_safe_markup(self._content()), markup=True))
+        self.mount(Static(self._content()))
         self.scroll_home(animate=False)
 
-    def _tab_line(self) -> str:
-        labels = []
+    def _tab_line(self) -> Text:
+        line = Text()
         for index, tab in enumerate(DETAIL_TABS, 1):
-            label = tab.title()
-            labels.append(f"[reverse]{index} {label}[/reverse]" if tab == self.active_tab else f"{index} {label}")
-        return "   ".join(labels)
+            if index > 1:
+                line.append("   ")
+            label = f"{index} {tab.title()}"
+            line.append(label, style="reverse" if tab == self.active_tab else None)
+        return line
 
-    def _content(self) -> str:
+    def _content(self) -> Text:
         result = self.result
         assert result is not None
         session = result.session
         display = provider_display(session.provider)
-        title = escape(_session_title(result, 120))
-        header = [
-            f"[bold]{title}[/bold]",
-            (
-                f"Session: [{display.style}]{display.label}[/{display.style}]"
-                f" · Project: [cyan]{escape(result.display_project)}[/cyan]"
-                f" · Activity: {_activity(result)}"
-            ),
-            self._tab_line(),
-            "",
-        ]
+        content = Text()
+        _append_line(content, _session_title(result, 120), "bold")
+        content.append("Session: ")
+        content.append(display.label, style=display.style)
+        content.append(" · Project: ")
+        content.append(result.display_project, style="cyan")
+        content.append(f" · Activity: {_activity(result)}\n")
+        content.append_text(self._tab_line())
+        content.append("\n\n")
 
         if self.active_tab == "overview":
             body = self._overview(result)
@@ -383,61 +381,81 @@ class DetailPanel(VerticalScroll):
         else:
             body = self._ai(result)
 
-        return "\n".join(header + body)
+        content.append_text(body)
+        return content
 
-    def _overview(self, result: SearchResult) -> list[str]:
+    def _overview(self, result: SearchResult) -> Text:
         session = result.session
         display = provider_display(session.provider)
-        fields = [
-            f"[bold]Score:[/bold] {_score_label(result.score)} ({result.score:.0%})",
-            f"[bold]Resume:[/bold] [green]{escape(result.resume_command)}[/green]",
-            f"[bold]Provider capabilities:[/bold] {', '.join(display.capabilities)}",
-            f"[bold]Model:[/bold] {escape(session.model or 'unknown')}",
-            f"[bold]Branch:[/bold] {escape(session.git_branch or session.git_branch_detected or 'unknown')}",
-            f"[bold]Messages:[/bold] {session.message_count}",
-            f"[bold]Source:[/bold] {escape(display.transcript_label)} · {escape(session.file_path)}",
-        ]
+        fields = Text()
+        _append_label(fields, "Score:", f"{_score_label(result.score)} ({result.score:.0%})")
+        _append_label(fields, "Resume:", result.resume_command, "green")
+        _append_label(fields, "Provider capabilities:", ", ".join(display.capabilities))
+        _append_label(fields, "Model:", session.model or "unknown")
+        _append_label(fields, "Branch:", session.git_branch or session.git_branch_detected or "unknown")
+        _append_label(fields, "Messages:", session.message_count)
+        fields.append("Source:", style="bold")
+        fields.append(f" {display.transcript_label} · {session.file_path}\n")
         if session.first_prompt:
-            fields.extend(["", "[bold]Started[/bold]", f"[dim]{escape(_shorten(session.first_prompt, 260))}[/dim]"])
+            fields.append("\n")
+            _append_line(fields, "Started", "bold")
+            _append_line(fields, _shorten(session.first_prompt, 260), "dim")
         if session.last_prompt and session.last_prompt != session.first_prompt:
-            fields.extend(["", "[bold]Left off[/bold]", f"[dim]{escape(_shorten(session.last_prompt, 260))}[/dim]"])
+            fields.append("\n")
+            _append_line(fields, "Left off", "bold")
+            _append_line(fields, _shorten(session.last_prompt, 260), "dim")
         return fields
 
-    def _why(self, result: SearchResult) -> list[str]:
-        lines = [
-            "[bold]Why this result matched[/bold]",
-            f"[green]Primary reason:[/green] {escape(_match_reason(result, self.query_text))}",
-        ]
+    def _why(self, result: SearchResult) -> Text:
+        lines = Text()
+        _append_line(lines, "Why this result matched", "bold")
+        lines.append("Primary reason:", style="green")
+        lines.append(f" {_match_reason(result, self.query_text)}\n")
         if result.fts_rank is not None:
-            lines.append(f"[cyan]Keyword signal:[/cyan] rank {result.fts_rank:.3f}")
+            lines.append("Keyword signal:", style="cyan")
+            lines.append(f" rank {result.fts_rank:.3f}\n")
         if result.vec_score is not None:
-            lines.append(f"[cyan]Semantic signal:[/cyan] distance/score {result.vec_score:.3f}")
+            lines.append("Semantic signal:", style="cyan")
+            lines.append(f" distance/score {result.vec_score:.3f}\n")
         snippets = [_shorten(snippet, 260) for snippet in result.snippets if _shorten(snippet, 260)]
         if snippets:
-            lines.extend(["", "[bold]Matched evidence[/bold]"])
+            lines.append("\n")
+            _append_line(lines, "Matched evidence", "bold")
             for snippet in snippets[:5]:
-                lines.append(f"- [dim]{escape(snippet)}[/dim]")
+                lines.append("- ")
+                _append_line(lines, snippet, "dim")
         else:
-            lines.extend(["", "[dim]No textual snippets were returned for this result.[/dim]"])
+            lines.append("\n")
+            _append_line(lines, "No textual snippets were returned for this result.", "dim")
         return lines
 
-    def _activity_detail(self, result: SearchResult) -> list[str]:
+    def _activity_detail(self, result: SearchResult) -> Text:
         session = result.session
         files = _json_list(session.files_modified)
         commands = _json_list(session.commands_run)
-        lines = [
-            "[bold]Files touched[/bold]",
-            *([f"- [green]{escape(path)}[/green]" for path in files[:20]] or ["[dim]No files recorded[/dim]"]),
-        ]
+        lines = Text()
+        _append_line(lines, "Files touched", "bold")
+        if files:
+            for path in files[:20]:
+                lines.append("- ")
+                _append_line(lines, path, "green")
+        else:
+            _append_line(lines, "No files recorded", "dim")
         if len(files) > 20:
-            lines.append(f"[dim]+{len(files) - 20} more files[/dim]")
-        lines.extend(["", "[bold]Commands run[/bold]"])
-        lines.extend([f"- [yellow]{escape(cmd)}[/yellow]" for cmd in commands[:20]] or ["[dim]No commands recorded[/dim]"])
+            _append_line(lines, f"+{len(files) - 20} more files", "dim")
+        lines.append("\n")
+        _append_line(lines, "Commands run", "bold")
+        if commands:
+            for cmd in commands[:20]:
+                lines.append("- ")
+                _append_line(lines, cmd, "yellow")
+        else:
+            _append_line(lines, "No commands recorded", "dim")
         if len(commands) > 20:
-            lines.append(f"[dim]+{len(commands) - 20} more commands[/dim]")
+            _append_line(lines, f"+{len(commands) - 20} more commands", "dim")
         return lines
 
-    def _related(self, result: SearchResult) -> list[str]:
+    def _related(self, result: SearchResult) -> Text:
         try:
             from code_recall.db import DB_PATH, get_connection, get_related_sessions
 
@@ -445,52 +463,55 @@ class DetailPanel(VerticalScroll):
             related = get_related_sessions(conn, result.session.session_id, limit=8)
             conn.close()
         except Exception as exc:
-            return ["[bold]Related sessions[/bold]", f"[dim]Unavailable: {escape(str(exc))}[/dim]"]
+            lines = Text()
+            _append_line(lines, "Related sessions", "bold")
+            _append_line(lines, f"Unavailable: {exc}", "dim")
+            return lines
 
-        lines = ["[bold]Related sessions[/bold]"]
+        lines = Text()
+        _append_line(lines, "Related sessions", "bold")
         if not related:
-            lines.append("[dim]No related sessions found.[/dim]")
+            _append_line(lines, "No related sessions found.", "dim")
             return lines
         for item in related:
-            name = escape(_shorten(str(item["summary"] or "Untitled"), 80))
-            lines.append(f"- [cyan]{name}[/cyan] [dim]shared files: {item['shared_files']}[/dim]")
+            name = _shorten(str(item["summary"] or "Untitled"), 80)
+            lines.append("- ")
+            lines.append(name, style="cyan")
+            lines.append(f" shared files: {item['shared_files']}\n", style="dim")
         return lines
 
-    def _ai(self, result: SearchResult) -> list[str]:
+    def _ai(self, result: SearchResult) -> Text:
         if self.ai_content:
-            return [self.ai_content]
-        return [
-            "[bold]Transcript chat[/bold]",
-            "[dim]Ask a question about this selected session in the prompt below.[/dim]",
-            "",
-            f"[bold]Session provider:[/bold] {provider_display(result.session.provider).label}",
-            f"[bold]Assistant provider:[/bold] {_assistant_label_for_session(result.session.provider)}",
-            "",
-            "[dim]The chat is scoped to this transcript, with read-only access to the source file when available.[/dim]",
-        ]
+            return self.ai_content
+        lines = Text()
+        _append_line(lines, "Transcript chat", "bold")
+        _append_line(lines, "Ask a question about this selected session in the prompt below.", "dim")
+        lines.append("\n")
+        _append_label(lines, "Session provider:", provider_display(result.session.provider).label)
+        _append_label(lines, "Assistant provider:", _assistant_label_for_session(result.session.provider))
+        lines.append("\n")
+        _append_line(lines, "The chat is scoped to this transcript, with read-only access to the source file when available.", "dim")
+        return lines
 
-    def _format_ai_chat(self, messages: list[tuple[str, str]], busy: bool) -> str:
-        lines = [
-            "[bold]Transcript chat[/bold]",
-            f"[dim]Assistant provider:[/dim] {escape(self.ai_assistant_label)}",
-            "",
-        ]
+    def _format_ai_chat(self, messages: list[tuple[str, str]], busy: bool) -> Text:
+        lines = Text()
+        _append_line(lines, "Transcript chat", "bold")
+        lines.append("Assistant provider:", style="dim")
+        lines.append(f" {self.ai_assistant_label}\n\n")
         if not messages:
-            lines.extend([
-                "[dim]Ask about decisions, files touched, commands run, outcomes, or what to resume next.[/dim]",
-                "[dim]This chat is scoped to the selected session transcript.[/dim]",
-            ])
-            return "\n".join(lines)
+            _append_line(lines, "Ask about decisions, files touched, commands run, outcomes, or what to resume next.", "dim")
+            _append_line(lines, "This chat is scoped to the selected session transcript.", "dim")
+            return lines
 
         for role, text in messages[-8:]:
             if role == "user":
-                lines.append(f"[cyan]You:[/cyan] {escape(text)}")
+                lines.append("You:", style="cyan")
             else:
-                lines.append(f"[green]{escape(self.ai_assistant_label)}:[/green] {escape(text)}")
-            lines.append("")
+                lines.append(f"{self.ai_assistant_label}:", style="green")
+            lines.append(f" {text}\n\n")
         if busy:
-            lines.append("[dim]Reading transcript evidence...[/dim]")
-        return "\n".join(lines).rstrip()
+            _append_line(lines, "Reading transcript evidence...", "dim")
+        return lines
 
 
 class SettingsScreen(ModalScreen):
@@ -712,6 +733,21 @@ class RecallApp(App):
         padding: 0 1;
         color: $text-muted;
     }
+    #results-loading {
+        display: none;
+        height: 3;
+        padding: 0 1;
+        color: $text-muted;
+    }
+    #results-loading.visible {
+        display: block;
+    }
+    #results-loading LoadingIndicator {
+        width: 4;
+    }
+    #results-loading-text {
+        padding: 1 0 0 1;
+    }
     #results {
         height: 1fr;
     }
@@ -803,6 +839,7 @@ class RecallApp(App):
         self._last_query = initial_query
         self._index_summary = "Index status unknown"
         self._ai_chats: dict[str, list[tuple[str, str]]] = {}
+        self._suppress_initial_search = bool(initial_query.strip() and initial_results)
 
     def _apply_responsive_layout(self, width: int) -> None:
         if width < 110:
@@ -824,6 +861,9 @@ class RecallApp(App):
         with Horizontal(id="main"):
             with Vertical(id="results-column"):
                 yield Static("", id="results-meta")
+                with Horizontal(id="results-loading"):
+                    yield LoadingIndicator()
+                    yield Static("", id="results-loading-text", markup=False)
                 yield ListView(id="results")
             with Vertical(id="detail-column"):
                 yield DetailPanel(id="detail")
@@ -842,6 +882,7 @@ class RecallApp(App):
         if self._all_results and self.initial_query.strip():
             self._display_results(self._all_results, self.initial_query)
         elif not self.initial_query.strip():
+            self._set_results_loading(True, "Loading recent sessions...")
             self._load_recent()
         else:
             self._display_results([], self.initial_query)
@@ -888,13 +929,18 @@ class RecallApp(App):
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
         query = event.value.strip()
+        if self._suppress_initial_search and query == self.initial_query.strip():
+            self._suppress_initial_search = False
+            return
+        self._suppress_initial_search = False
         self._last_query = query
         if not query:
             self._set_status("Showing recent sessions across selected providers")
+            self._set_results_loading(True, "Loading recent sessions...")
             self._load_recent()
             return
         self._set_status(f'Searching for "{query}"...')
-        self.query_one("#results", ListView).add_class("loading-results")
+        self._set_results_loading(True, self._search_loading_message(query))
         self._debounced_search(query)
 
     @on(Input.Submitted, "#search-input")
@@ -952,9 +998,10 @@ class RecallApp(App):
         except Exception as exc:
             self._index_summary = f"Index status unavailable: {exc}"
 
-        self.query_one("#summary", Static).update(
-            f"[bold]code-recall v{__version__}[/bold]  {escape(self._index_summary)}"
-        )
+        summary = Text()
+        summary.append(f"code-recall v{__version__}", style="bold")
+        summary.append(f"  {self._index_summary}")
+        self.query_one("#summary", Static).update(summary)
 
     @work(exclusive=True, thread=True)
     def _load_recent(self) -> None:
@@ -1002,7 +1049,7 @@ class RecallApp(App):
         self._visible_results = visible
 
         list_view = self.query_one("#results", ListView)
-        list_view.remove_class("loading-results")
+        self._set_results_loading(False)
         list_view.index = None
         list_view.clear()
 
@@ -1034,13 +1081,15 @@ class RecallApp(App):
 
     def _display_error(self, title: str, exc: Exception) -> None:
         self.query_one("#results", ListView).clear()
-        self.query_one("#results", ListView).remove_class("loading-results")
-        self.query_one("#results-meta", Static).update(f"[red]{escape(title)}[/red]")
-        self.query_one("#detail", DetailPanel).render_empty(
-            f"[bold red]{escape(title)}[/bold red]\n\n"
-            f"{escape(str(exc))}\n\n"
-            "[dim]Try running code-recall index, or inspect ~/.code-recall for the database and logs.[/dim]"
-        )
+        self._set_results_loading(False)
+        self.query_one("#results-meta", Static).update(Text(str(title), style="red"))
+        detail = Text()
+        _append_line(detail, title, "bold red")
+        detail.append("\n")
+        _append_line(detail, exc)
+        detail.append("\n")
+        _append_line(detail, "Try running code-recall index, or inspect ~/.code-recall for the database and logs.", "dim")
+        self.query_one("#detail", DetailPanel).render_empty(detail)
         self._set_status(title)
 
     def _filter_results(self, results: list[SearchResult]) -> list[SearchResult]:
@@ -1050,16 +1099,41 @@ class RecallApp(App):
 
     def _update_results_meta(self, all_results: list[SearchResult], visible: list[SearchResult], query: str) -> None:
         if query:
-            prefix = f'{len(visible)} of {len(all_results)} results for "{escape(query)}"'
+            prefix = f'{len(visible)} of {len(all_results)} results for "{query}"'
         else:
             prefix = f"{len(visible)} recent sessions"
         scope = "all providers" if self._provider_scope == "all" else provider_display(self._provider_scope).label
-        self.query_one("#results-meta", Static).update(
-            f"[bold]{prefix}[/bold] [dim]in {scope}[/dim]"
-        )
+        meta = Text()
+        meta.append(prefix, style="bold")
+        meta.append(f" in {scope}", style="dim")
+        self.query_one("#results-meta", Static).update(meta)
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Label).update(message)
+
+    def _current_search_mode(self) -> str:
+        from code_recall.config import load_config
+
+        return str(load_config().get("search_mode", "hybrid"))
+
+    def _search_loading_message(self, query: str) -> str:
+        mode = self._current_search_mode()
+        if mode == "llm":
+            return f'Searching "{query}" in LLM mode. Results below are from the previous search until this finishes.'
+        return f'Searching "{query}" in {mode} mode...'
+
+    def _set_results_loading(self, loading: bool, message: str = "") -> None:
+        loading_bar = self.query_one("#results-loading", Horizontal)
+        loading_text = self.query_one("#results-loading-text", Static)
+        results = self.query_one("#results", ListView)
+        if loading:
+            loading_text.update(message)
+            loading_bar.add_class("visible")
+            results.add_class("loading-results")
+        else:
+            loading_bar.remove_class("visible")
+            loading_text.update("")
+            results.remove_class("loading-results")
 
     def _sync_ai_input_visibility(self) -> None:
         ai_input = self.query_one("#ai-chat-input", Input)
@@ -1308,23 +1382,29 @@ class RecallApp(App):
         self.call_from_thread(self._show_ai_answer, answer)
 
     def _show_ai_answer(self, answer) -> None:
-        source_lines = []
-        for source in answer.sources[:8]:
-            source_lines.append(
-                f"[dim]{source.rank}.[/dim] [cyan]{escape(source.title)}[/cyan]\n"
-                f"   [dim]{escape(source.project_path)} · {source.activity} · {source.score:.0%}[/dim]\n"
-                f"   [green]{escape(source.resume_command)}[/green]"
-            )
-        error_line = f"\n\n[red]{escape(answer.error)}[/red]" if answer.error else ""
-        content = (
-            f"[bold]AI investigation[/bold]\n"
-            f"[dim]Assistant provider:[/dim] {escape(provider_display(answer.assistant_provider).label if answer.assistant_provider else 'Unavailable')}\n"
-            f"[dim]Question:[/dim] {escape(answer.query)}\n\n"
-            f"{escape(answer.answer)}"
-            f"{error_line}\n\n"
-            f"[bold]Evidence sources:[/bold]\n"
-            f"{chr(10).join(source_lines) if source_lines else '[dim]No sources[/dim]'}"
-        )
+        content = Text()
+        _append_line(content, "AI investigation", "bold")
+        content.append("Assistant provider:", style="dim")
+        content.append(f" {provider_display(answer.assistant_provider).label if answer.assistant_provider else 'Unavailable'}\n")
+        content.append("Question:", style="dim")
+        content.append(f" {answer.query}\n\n")
+        content.append(str(answer.answer))
+        if answer.error:
+            content.append("\n\n")
+            _append_line(content, answer.error, "red")
+        content.append("\n\n")
+        _append_line(content, "Evidence sources:", "bold")
+        if answer.sources:
+            for source in answer.sources[:8]:
+                content.append(f"{source.rank}.", style="dim")
+                content.append(" ")
+                content.append(str(source.title), style="cyan")
+                content.append("\n   ")
+                content.append(f"{source.project_path} · {source.activity} · {source.score:.0%}", style="dim")
+                content.append("\n   ")
+                _append_line(content, source.resume_command, "green")
+        else:
+            _append_line(content, "No sources", "dim")
         assistant_label = provider_display(answer.assistant_provider).label if answer.assistant_provider else "Unavailable"
         self.query_one("#detail", DetailPanel).set_ai_answer(content, ok=answer.ok, assistant_label=assistant_label)
         self._sync_ai_input_visibility()
