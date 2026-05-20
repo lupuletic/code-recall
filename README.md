@@ -191,12 +191,27 @@ AI features use the matching assistant when possible: Claude Code sessions prefe
 
 ## MCP Server
 
-code-recall can run as an [MCP](https://modelcontextprotocol.io) server over stdio, so a coding agent can call fast, ranked session retrieval instead of blindly grepping transcript files.
+code-recall can run as an [MCP](https://modelcontextprotocol.io) server over stdio, so your coding agent calls fast, ranked session retrieval instead of blindly grepping transcript files.
+
+**Install and wire it into both Claude Code and Codex in one line:**
 
 ```bash
-# Requires the mcp extra: pip install 'code-recall[all]' or 'code-recall[mcp]'
-claude mcp add code-recall -- code-recall mcp
+pip install 'code-recall[all]' && code-recall mcp install
 ```
+
+`code-recall mcp install` registers the server with every agent CLI it finds on your PATH (`claude` and `codex`) and is idempotent — re-run it any time. Restart the agent, then just ask it to find a past session.
+
+<details>
+<summary>Manual registration / what it runs under the hood</summary>
+
+```bash
+# Claude Code (user scope — available in every project)
+claude mcp add --scope user code-recall -- code-recall mcp
+
+# Codex
+codex mcp add code-recall -- code-recall mcp
+```
+</details>
 
 It exposes two tools:
 

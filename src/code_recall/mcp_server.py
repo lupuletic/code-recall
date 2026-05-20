@@ -10,6 +10,8 @@ Add to Claude Code:
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -216,6 +218,64 @@ def _ensure_fresh_index(
         )
     except Exception:
         pass
+
+
+def install_to_agents() -> int:
+    """Register the MCP server with every supported agent CLI found on PATH
+    (Claude Code and Codex). Idempotent — re-running re-points existing
+    entries. Returns 0 if at least one agent was configured.
+
+    Registration commands (run for whichever CLI exists):
+        claude mcp add --scope user code-recall -- code-recall mcp
+        codex  mcp add code-recall -- code-recall mcp
+    """
+    agents = [
+        {
+            "name": "Claude Code",
+            "cli": "claude",
+            "remove": ["claude", "mcp", "remove", "--scope", "user", "code-recall"],
+            "add": ["claude", "mcp", "add", "--scope", "user", "code-recall", "--", "code-recall", "mcp"],
+        },
+        {
+            "name": "Codex",
+            "cli": "codex",
+            "remove": ["codex", "mcp", "remove", "code-recall"],
+            "add": ["codex", "mcp", "add", "code-recall", "--", "code-recall", "mcp"],
+        },
+    ]
+
+    configured = 0
+    found_any = False
+    for agent in agents:
+        if shutil.which(agent["cli"]) is None:
+            print(f"- {agent['name']}: {agent['cli']} not on PATH, skipped", file=sys.stderr)
+            continue
+        found_any = True
+        subprocess.run(agent["remove"], capture_output=True)  # drop stale entry
+        result = subprocess.run(agent["add"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"- {agent['name']}: registered (code-recall mcp)", file=sys.stderr)
+            configured += 1
+        else:
+            print(f"- {agent['name']}: FAILED", file=sys.stderr)
+            sys.stderr.write(result.stdout)
+            sys.stderr.write(result.stderr)
+
+    if not found_any:
+        print(
+            "No supported agent CLI found (claude or codex). Install one, then run:\n"
+            "  code-recall mcp install",
+            file=sys.stderr,
+        )
+        return 1
+
+    if configured:
+        print(
+            f"\nDone — code-recall is wired into {configured} agent(s). "
+            "Restart the agent, then ask it to find a past session.",
+            file=sys.stderr,
+        )
+    return 0 if configured else 1
 
 
 def run(

@@ -74,3 +74,31 @@ def test_get_session_detail(server):
 
 def test_get_session_detail_missing_returns_none(server):
     assert _call(server, "get_session_detail", {"session_id": "nope"}) is None
+
+
+def test_install_no_agent_cli_returns_error(monkeypatch):
+    """install_to_agents reports cleanly when neither agent CLI is present."""
+    monkeypatch.setattr(mcp_server.shutil, "which", lambda _name: None)
+    assert mcp_server.install_to_agents() == 1
+
+
+def test_install_registers_found_agents(monkeypatch):
+    """install_to_agents runs add for each CLI on PATH and returns 0."""
+    import subprocess
+
+    monkeypatch.setattr(
+        mcp_server.shutil, "which",
+        lambda name: f"/usr/local/bin/{name}" if name in ("claude", "codex") else None,
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(mcp_server.subprocess, "run", fake_run)
+    assert mcp_server.install_to_agents() == 0
+    # Both agents' add commands were issued
+    added = [c for c in calls if "add" in c]
+    assert any("claude" in c for c in added)
+    assert any("codex" in c for c in added)

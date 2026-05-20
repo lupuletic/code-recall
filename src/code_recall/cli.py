@@ -524,7 +524,15 @@ def _cmd_index(args: argparse.Namespace) -> None:
 
 
 def _cmd_mcp(args: argparse.Namespace) -> None:
-    """Run the MCP server over stdio so agents can call session search."""
+    """Run the MCP server, or 'code-recall mcp install' to register it
+    with the agent CLIs (Claude Code and Codex)."""
+    sub = args.query[1] if len(args.query) > 1 else None
+
+    if sub in ("install", "setup"):
+        from code_recall.mcp_server import install_to_agents
+
+        raise SystemExit(install_to_agents())
+
     from code_recall.mcp_server import run
 
     run(
