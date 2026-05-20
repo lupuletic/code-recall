@@ -252,6 +252,11 @@ def _search_pipeline(
                 graph_weight=0.65,
                 k=60,
             )
+        from code_recall.config import load_config
+
+        if load_config().get("search_mode") == "llm" and fts_results:
+            fts_results = _llm_rerank(query, fts_results[:limit])
+
         # Apply boosts before final normalization
         _apply_depth_boost(fts_results)
         _apply_project_path_boost(query, fts_results)

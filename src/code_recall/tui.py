@@ -694,6 +694,21 @@ class RecallApp(App):
         padding: 0 1;
         color: $text-muted;
     }
+    #results-loading {
+        display: none;
+        height: 3;
+        padding: 0 1;
+        color: $text-muted;
+    }
+    #results-loading.visible {
+        display: block;
+    }
+    #results-loading LoadingIndicator {
+        width: 4;
+    }
+    #results-loading-text {
+        padding: 1 0 0 1;
+    }
     #results {
         height: 1fr;
     }
@@ -785,6 +800,7 @@ class RecallApp(App):
         self._last_query = initial_query
         self._index_summary = "Index status unknown"
         self._ai_chats: dict[str, list[tuple[str, str]]] = {}
+        self._suppress_initial_search = bool(initial_query.strip() and initial_results)
 
     def _apply_responsive_layout(self, width: int) -> None:
         if width < 110:
@@ -806,6 +822,9 @@ class RecallApp(App):
         with Horizontal(id="main"):
             with Vertical(id="results-column"):
                 yield Static("", id="results-meta")
+                with Horizontal(id="results-loading"):
+                    yield LoadingIndicator()
+                    yield Static("", id="results-loading-text")
                 yield ListView(id="results")
             with Vertical(id="detail-column"):
                 yield DetailPanel(id="detail")
@@ -824,6 +843,7 @@ class RecallApp(App):
         if self._all_results and self.initial_query.strip():
             self._display_results(self._all_results, self.initial_query)
         elif not self.initial_query.strip():
+            self._set_results_loading(True, "Loading recent sessions...")
             self._load_recent()
         else:
             self._display_results([], self.initial_query)
@@ -870,13 +890,18 @@ class RecallApp(App):
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
         query = event.value.strip()
+        if self._suppress_initial_search and query == self.initial_query.strip():
+            self._suppress_initial_search = False
+            return
+        self._suppress_initial_search = False
         self._last_query = query
         if not query:
             self._set_status("Showing recent sessions across selected providers")
+            self._set_results_loading(True, "Loading recent sessions...")
             self._load_recent()
             return
         self._set_status(f'Searching for "{query}"...')
-        self.query_one("#results", ListView).add_class("loading-results")
+        self._set_results_loading(True, self._search_loading_message(query))
         self._debounced_search(query)
 
     @on(Input.Submitted, "#search-input")
@@ -984,7 +1009,7 @@ class RecallApp(App):
         self._visible_results = visible
 
         list_view = self.query_one("#results", ListView)
-        list_view.remove_class("loading-results")
+        self._set_results_loading(False)
         list_view.index = None
         list_view.clear()
 
@@ -1016,7 +1041,7 @@ class RecallApp(App):
 
     def _display_error(self, title: str, exc: Exception) -> None:
         self.query_one("#results", ListView).clear()
-        self.query_one("#results", ListView).remove_class("loading-results")
+        self._set_results_loading(False)
         self.query_one("#results-meta", Static).update(f"[red]{escape(title)}[/red]")
         self.query_one("#detail", DetailPanel).render_empty(
             f"[bold red]{escape(title)}[/bold red]\n\n"
@@ -1042,6 +1067,30 @@ class RecallApp(App):
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Label).update(message)
+
+    def _current_search_mode(self) -> str:
+        from code_recall.config import load_config
+
+        return str(load_config().get("search_mode", "hybrid"))
+
+    def _search_loading_message(self, query: str) -> str:
+        mode = self._current_search_mode()
+        if mode == "llm":
+            return f'Searching "{query}" in LLM mode. Results below are from the previous search until this finishes.'
+        return f'Searching "{query}" in {mode} mode...'
+
+    def _set_results_loading(self, loading: bool, message: str = "") -> None:
+        loading_bar = self.query_one("#results-loading", Horizontal)
+        loading_text = self.query_one("#results-loading-text", Static)
+        results = self.query_one("#results", ListView)
+        if loading:
+            loading_text.update(message)
+            loading_bar.add_class("visible")
+            results.add_class("loading-results")
+        else:
+            loading_bar.remove_class("visible")
+            loading_text.update("")
+            results.remove_class("loading-results")
 
     def _sync_ai_input_visibility(self) -> None:
         ai_input = self.query_one("#ai-chat-input", Input)

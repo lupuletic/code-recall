@@ -20,6 +20,6 @@ uv run pytest -q
 uv run python -m compileall -q src tests
 uv build --no-sources
 
-git tag v0.2.2
+git tag vX.Y.Z
 git push origin main --tags
 ```

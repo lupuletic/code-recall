@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from code_recall.config import DEFAULTS
 from code_recall.db import (
     get_connection,
     upsert_chunks,
@@ -197,6 +198,17 @@ class TestSearch:
         results = search("auth middleware", db_path=search_db, semantic=False)
         assert len(results) >= 1
         assert results[0].session.session_id == "s1"
+
+    def test_llm_mode_reranks_without_semantic(self, search_db):
+        config = {**DEFAULTS, "search_mode": "llm"}
+        with (
+            patch("code_recall.config.load_config", return_value=config),
+            patch("code_recall.searcher._llm_rerank", side_effect=lambda _query, results: results) as rerank,
+        ):
+            results = search("auth middleware", db_path=search_db, semantic=False)
+
+        assert results
+        rerank.assert_called_once()
 
     def test_empty_query_returns_empty(self, search_db):
         assert search("", db_path=search_db) == []

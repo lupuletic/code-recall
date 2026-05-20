@@ -10,6 +10,7 @@ pytest.importorskip("textual")
 
 from code_recall.models import SearchResult, Session
 from code_recall.tui import DetailPanel, RecallApp, provider_display
+from textual.widgets import Static
 
 
 def _text(widget) -> str:
@@ -73,6 +74,8 @@ def test_tui_renders_provider_filters_and_detail(tmp_path):
             assert "2 of 2 results" in _text(app.query_one("#results-meta"))
             assert "Claude 1" in _text(app.query_one("#filter-bar"))
             assert "Codex 1" in _text(app.query_one("#filter-bar"))
+            assert "visible" not in app.query_one("#results-loading").classes
+            assert "loading-results" not in app.query_one("#results").classes
 
             detail = app.query_one("#detail", DetailPanel)
             assert detail.result is not None
@@ -160,6 +163,35 @@ def test_tui_ai_tab_exposes_transcript_chat_input(tmp_path):
             assert "visible" in ai_input.classes
             assert "Transcript chat" in _text(detail.query_one(Static))
 
-    from textual.widgets import Static
+    asyncio.run(run())
+
+
+def test_tui_search_loading_banner_is_explicit(tmp_path):
+    async def run() -> None:
+        app = RecallApp(
+            initial_query="auth",
+            initial_results=[_result("s1")],
+            db_path=tmp_path / "missing.db",
+        )
+        async with app.run_test(size=(140, 36)) as pilot:
+            await pilot.pause()
+
+            app._set_results_loading(
+                True,
+                'Searching "auth" in LLM mode. Results below are from the previous search until this finishes.',
+            )
+            await pilot.pause()
+
+            assert "visible" in app.query_one("#results-loading").classes
+            assert "loading-results" in app.query_one("#results").classes
+            assert "LLM mode" in _text(app.query_one("#results-loading-text", Static))
+            assert "previous search" in _text(app.query_one("#results-loading-text", Static))
+
+            app._set_results_loading(False)
+            await pilot.pause()
+
+            assert "visible" not in app.query_one("#results-loading").classes
+            assert "loading-results" not in app.query_one("#results").classes
+            assert _text(app.query_one("#results-loading-text", Static)) == ""
 
     asyncio.run(run())
