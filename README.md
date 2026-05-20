@@ -152,6 +152,12 @@ With an empty search box, the TUI shows your most recent indexed sessions. Resul
 
 The default search mode is `hybrid`.
 
+| Mode | Best for | Tradeoff |
+|------|----------|----------|
+| `hybrid` | Default daily use. Combines keyword, graph, semantic, and reranking signals when extras are installed. | Slightly more setup for semantic search; gracefully falls back when extras are missing. |
+| `keyword` | Exact terms, smallest installs, scripting, and environments with no semantic dependencies. | Fastest path, but no semantic recall for vague descriptions. |
+| `llm` | Ambiguous searches where you want an installed Claude Code or Codex CLI to judge candidate sessions. | Much slower; sends query and candidate summaries to the selected assistant CLI. |
+
 ```bash
 code-recall config search_mode hybrid   # keyword + semantic + reranking
 code-recall config search_mode keyword  # FTS only, fastest, no semantic deps
