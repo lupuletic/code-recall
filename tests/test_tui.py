@@ -195,3 +195,49 @@ def test_tui_search_loading_banner_is_explicit(tmp_path):
             assert _text(app.query_one("#results-loading-text", Static)) == ""
 
     asyncio.run(run())
+
+
+def test_tui_renders_bracketed_transcript_snippets(tmp_path):
+    async def run() -> None:
+        result = _result("s1", summary="Review screenshot")
+        result.snippets = ["[Image: source: /tmp/clipboard.png] compare this view"]
+        app = RecallApp(
+            initial_query="screenshot",
+            initial_results=[result],
+            db_path=tmp_path / "missing.db",
+        )
+        async with app.run_test(size=(140, 36)) as pilot:
+            await pilot.pause()
+            assert "1 of 1 results" in _text(app.query_one("#results-meta"))
+
+    asyncio.run(run())
+
+
+def test_tui_detail_tabs_render_bracketed_raw_text(tmp_path):
+    async def run() -> None:
+        result = _result("s1", summary="[Image: source: /tmp/title.png] Review screenshot")
+        result.session.first_prompt = "[Image: source: /tmp/first.png] what changed?"
+        result.session.last_prompt = "[Image: source: /tmp/last.png] verify it"
+        result.session.files_modified = '["src/[image].py"]'
+        result.session.commands_run = '["echo [Image: source: /tmp/cmd.png]"]'
+        result.snippets = ["[Image: source: /tmp/snippet.png] compare this view"]
+
+        app = RecallApp(
+            initial_query="[Image: source]",
+            initial_results=[result],
+            db_path=tmp_path / "missing.db",
+        )
+        async with app.run_test(size=(140, 36)) as pilot:
+            await pilot.pause()
+            for tab in ("why", "activity", "ai"):
+                app.action_detail_tab(tab)
+                await pilot.pause()
+            app.query_one("#detail", DetailPanel).set_ai_chat(
+                [("user", "[Image: source: /tmp/question.png] what happened?")],
+                busy=False,
+                assistant_label="Claude Code",
+            )
+            await pilot.pause()
+            assert "1 of 1 results" in _text(app.query_one("#results-meta"))
+
+    asyncio.run(run())
