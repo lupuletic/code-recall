@@ -189,6 +189,24 @@ code-recall currently indexes:
 
 AI features use the matching assistant when possible: Claude Code sessions prefer `claude -p`, Codex sessions prefer `codex exec`. If the matching CLI is not installed, code-recall falls back to the other supported CLI when available and shows the assistant provider in the AI tab.
 
+## MCP Server
+
+code-recall can run as an [MCP](https://modelcontextprotocol.io) server over stdio, so a coding agent can call fast, ranked session retrieval instead of blindly grepping transcript files.
+
+```bash
+# Requires the mcp extra: pip install 'code-recall[all]' or 'code-recall[mcp]'
+claude mcp add code-recall -- code-recall mcp
+```
+
+It exposes two tools:
+
+| Tool | What it does |
+|------|--------------|
+| `search_sessions(query, limit, provider, project)` | Hybrid ranked search over the local index. Returns matched sessions with title, project, provider, score, why-matched, a snippet, and a ready-to-run resume command. Supports `file:`, `cmd:`, `branch:` prefixes. |
+| `get_session_detail(session_id)` | Full detail for one session: files touched, commands run, branch, model, first/last prompts, resume command. |
+
+The server reads only the local SQLite index — no transcript content leaves your machine, and every query runs a quick incremental index first so results stay fresh.
+
 ## Index Freshness
 
 code-recall keeps the index fresh in two ways:

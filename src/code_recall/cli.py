@@ -87,6 +87,9 @@ def _run(argv: list[str] | None = None) -> None:
 
     if command in ("index", "i"):
         _cmd_index(args)
+    elif command == "mcp":
+        _cmd_mcp(args)
+        return
     elif command == "info":
         _cmd_info(args)
     elif command == "gc":
@@ -518,6 +521,17 @@ def _cmd_index(args: argparse.Namespace) -> None:
             f"{stats['removed']} removed",
             file=sys.stderr,
         )
+
+
+def _cmd_mcp(args: argparse.Namespace) -> None:
+    """Run the MCP server over stdio so agents can call session search."""
+    from code_recall.mcp_server import run
+
+    run(
+        db_path=args.db,
+        projects_dir=args.claude_dir,
+        codex_dir=None if args.no_codex else args.codex_dir,
+    )
 
 
 def _cmd_info(args: argparse.Namespace) -> None:
