@@ -14,7 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from code_recall.cli import main
+from code_recall import cli
+from code_recall.cli import _sync_index_hook, main
 
 
 @pytest.fixture(autouse=True)
@@ -354,3 +355,159 @@ class TestConfigCommand:
     def test_config_set_invalid(self, capsys, isolate_env):
         with pytest.raises(SystemExit):
             main(["config", "search_mode", "bogus"])
+
+
+# ===========================================================================
+# SessionEnd hook sync
+# ===========================================================================
+
+class TestSyncIndexHook:
+    BIN = "/opt/tools/bin/code-recall"
+
+    @pytest.fixture
+    def home(self, tmp_path, monkeypatch):
+        """Fake $HOME with a .claude dir, plus a resolvable binary."""
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr("shutil.which", lambda _: self.BIN)
+        return fake_home
+
+    @staticmethod
+    def _settings(home):
+        return home / ".claude" / "settings.json"
+
+    @staticmethod
+    def _write(path, data):
+        path.write_text(json.dumps(data))
+
+    def _hook_of(self, home):
+        settings = json.loads(self._settings(home).read_text())
+        return settings["hooks"]["SessionEnd"][0]["hooks"][0]
+
+    def _legacy_settings(self, home, command):
+        self._write(
+            self._settings(home),
+            {
+                "model": "opus",
+                "hooks": {
+                    "SessionEnd": [
+                        {"hooks": [{"type": "command", "command": command}]}
+                    ]
+                },
+            },
+        )
+
+    @pytest.mark.parametrize("legacy", ["claude-recall", "claude-code-recall"])
+    def test_repairs_legacy_command_when_not_first_run(self, home, legacy):
+        """Regression: a renamed binary left the hook permanently broken.
+
+        The repair must happen on an ordinary run, because a hook pointing at a
+        missing command never executes and so can never fix itself.
+        """
+        self._legacy_settings(home, f"/old/venv/bin/{legacy} index --quiet")
+
+        status, _ = _sync_index_hook(install_if_missing=False)
+
+        assert status == "repaired"
+        assert self._hook_of(home)["command"] == f"{self.BIN} index --quiet"
+
+    def test_repair_preserves_unrelated_settings(self, home):
+        self._legacy_settings(home, "/old/venv/bin/claude-recall index --quiet")
+
+        _sync_index_hook(install_if_missing=False)
+
+        assert json.loads(self._settings(home).read_text())["model"] == "opus"
+
+    def test_repair_applies_full_desired_config(self, home):
+        self._legacy_settings(home, "/old/venv/bin/claude-recall index --quiet")
+
+        _sync_index_hook(install_if_missing=False)
+
+        hook = self._hook_of(home)
+        assert hook["timeout"] == 30
+        assert hook["async"] is True
+
+    def test_is_idempotent(self, home):
+        self._legacy_settings(home, "/old/venv/bin/claude-recall index --quiet")
+        assert _sync_index_hook(install_if_missing=False)[0] == "repaired"
+
+        assert _sync_index_hook(install_if_missing=False)[0] == "unchanged"
+
+    def test_keeps_extra_user_keys(self, home):
+        self._write(
+            self._settings(home),
+            {
+                "hooks": {
+                    "SessionEnd": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "/old/bin/claude-recall index",
+                                    "statusMessage": "indexing",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+        )
+
+        _sync_index_hook(install_if_missing=False)
+
+        assert self._hook_of(home)["statusMessage"] == "indexing"
+
+    def test_does_not_reinstall_a_hook_the_user_removed(self, home):
+        self._write(self._settings(home), {"model": "opus"})
+
+        status, _ = _sync_index_hook(install_if_missing=False)
+
+        assert status == "unchanged"
+        assert "hooks" not in json.loads(self._settings(home).read_text())
+
+    def test_installs_when_requested(self, home):
+        self._write(self._settings(home), {"model": "opus"})
+
+        status, _ = _sync_index_hook(install_if_missing=True)
+
+        assert status == "installed"
+        assert self._hook_of(home)["command"] == f"{self.BIN} index --quiet"
+
+    def test_unreadable_settings_are_left_untouched(self, home):
+        """A parse failure must not turn into a rewrite of the whole file."""
+        self._settings(home).write_text("{ this is not json")
+
+        status, _ = _sync_index_hook(install_if_missing=True)
+
+        assert status == "skipped"
+        assert self._settings(home).read_text() == "{ this is not json"
+
+    def test_skips_when_binary_missing(self, home, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda _: None)
+        self._write(self._settings(home), {"model": "opus"})
+
+        status, _ = _sync_index_hook(install_if_missing=True)
+
+        assert status == "skipped"
+        assert "hooks" not in json.loads(self._settings(home).read_text())
+
+    @patch("code_recall.cli.search", return_value=[])
+    @patch("code_recall.cli.ensure_index")
+    def test_ordinary_run_repairs_stale_hook(
+        self, mock_index, mock_search, home, isolate_env
+    ):
+        """The established-install path must actually reach the repair.
+
+        This is the real regression: hook sync used to be gated behind
+        "the index does not exist yet", so anyone past their first run kept a
+        broken hook forever. Exercised through main() because the bug was in
+        the gate, not in the sync itself.
+        """
+        isolate_env["db_path"].touch()  # an existing install, not a first run
+        cli.HOOKS_MARKER.touch()  # and one that already installed hooks once
+        self._legacy_settings(home, "/old/venv/bin/claude-recall index --quiet")
+
+        main(["some", "query", "--no-tui"])
+
+        assert self._hook_of(home)["command"] == f"{self.BIN} index --quiet"

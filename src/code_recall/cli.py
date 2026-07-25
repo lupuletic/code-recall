@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -131,71 +132,121 @@ def _first_run_setup(args: argparse.Namespace) -> None:
         verbose=is_first_run and show_output,
     )
 
-    # Auto-install hooks on first run
-    if is_first_run and not HOOKS_MARKER.exists():
-        _auto_install_hooks()
-
-
-def _auto_install_hooks() -> None:
-    """Silently install SessionEnd hooks on first run."""
+    # Repair a stale hook on every run, but only add a missing one on first run.
+    # A hook's command breaks whenever the tool is renamed or reinstalled
+    # somewhere else, and a broken hook cannot fix itself — it never runs — so
+    # the repair has to ride along on an ordinary invocation.
     from code_recall.config import load_config
 
-    if not load_config().get("auto_index_hook", True):
-        return
+    if load_config().get("auto_index_hook", True):
+        status, _ = _sync_index_hook(
+            install_if_missing=is_first_run and not HOOKS_MARKER.exists()
+        )
+        if show_output and status == "installed":
+            print(
+                "  Auto-installed SessionEnd hook for live index updates.\n",
+                file=sys.stderr,
+            )
+        elif show_output and status == "repaired":
+            print(
+                "  Repaired the SessionEnd hook — it pointed at a command "
+                "that no longer exists.\n",
+                file=sys.stderr,
+            )
 
+
+def _sync_index_hook(
+    *, install_if_missing: bool, fallback_to_name: bool = False
+) -> tuple[str, str]:
+    """Point the Claude Code SessionEnd hook at the current binary.
+
+    An existing hook is refreshed whenever it differs from the desired config,
+    so a rename or reinstall self-heals. A missing hook is only added when
+    ``install_if_missing`` is set, so one the user deleted stays deleted.
+
+    Returns ``(status, hook_command)`` where status is one of ``skipped``,
+    ``unchanged``, ``repaired`` or ``installed``.
+    """
     import shutil
 
     settings_path = Path.home() / ".claude" / "settings.json"
     code_recall_bin = shutil.which(COMMAND_NAME)
     if not code_recall_bin:
-        return
+        if not fallback_to_name:
+            return "skipped", ""
+        code_recall_bin = COMMAND_NAME
 
     hook_command = f"{code_recall_bin} index --quiet"
     desired_hook = _index_hook_config(hook_command)
 
-    settings = {}
+    settings: dict = {}
     if settings_path.exists():
         try:
             with open(settings_path) as f:
                 settings = json.load(f)
         except (json.JSONDecodeError, OSError):
-            pass
+            # Never write back settings we failed to read: doing so would
+            # replace every unrelated key in the file with just our hook.
+            return "skipped", hook_command
+        if not isinstance(settings, dict):
+            return "skipped", hook_command
 
-    hooks = settings.get("hooks", {})
-    session_end_hooks = hooks.get("SessionEnd", [])
+    hooks = settings.get("hooks") or {}
+    session_end_hooks = hooks.get("SessionEnd") or []
 
-    # Don't install if already present
     for rule in session_end_hooks:
         for hook in rule.get("hooks", []):
-            if _hook_mentions_app(hook.get("command", "")):
-                hook.update(desired_hook)
-                try:
-                    settings_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(settings_path, "w") as f:
-                        json.dump(settings, f, indent=2)
-                    HOOKS_MARKER.parent.mkdir(parents=True, exist_ok=True)
-                    HOOKS_MARKER.touch()
-                except OSError:
-                    pass
-                return
+            if not _hook_mentions_app(hook.get("command", "")):
+                continue
+            # Subset check, not equality: leave any extra keys the user added
+            # in place, and stay a no-op once they are satisfied.
+            if all(hook.get(key) == value for key, value in desired_hook.items()):
+                return "unchanged", hook_command
+            hook.update(desired_hook)
+            hooks["SessionEnd"] = session_end_hooks
+            settings["hooks"] = hooks
+            if not _write_settings(settings_path, settings):
+                return "skipped", hook_command
+            _touch_hooks_marker()
+            return "repaired", hook_command
 
-    new_hook = {
-        "hooks": [desired_hook]
-    }
-    session_end_hooks.append(new_hook)
+    if not install_if_missing:
+        return "unchanged", hook_command
+
+    session_end_hooks.append({"hooks": [desired_hook]})
     hooks["SessionEnd"] = session_end_hooks
     settings["hooks"] = hooks
+    if not _write_settings(settings_path, settings):
+        return "skipped", hook_command
+    _touch_hooks_marker()
+    return "installed", hook_command
 
+
+def _write_settings(settings_path: Path, settings: dict) -> bool:
+    """Write settings.json atomically. Returns False if it could not be written.
+
+    The rename is atomic, so an interrupted write leaves the user's existing
+    settings intact rather than a half-truncated file.
+    """
+    tmp_path = settings_path.with_name(settings_path.name + ".tmp")
     try:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(settings_path, "w") as f:
+        with open(tmp_path, "w") as f:
             json.dump(settings, f, indent=2)
+        os.replace(tmp_path, settings_path)
+        return True
+    except OSError:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+def _touch_hooks_marker() -> None:
+    try:
         HOOKS_MARKER.parent.mkdir(parents=True, exist_ok=True)
         HOOKS_MARKER.touch()
-        print(
-            "  Auto-installed SessionEnd hook for live index updates.\n",
-            file=sys.stderr,
-        )
     except OSError:
         pass
 
@@ -599,50 +650,23 @@ def _cmd_install_hooks() -> None:
     import shutil
 
     settings_path = Path.home() / ".claude" / "settings.json"
-    code_recall_bin = shutil.which(COMMAND_NAME)
 
-    if not code_recall_bin:
+    if not shutil.which(COMMAND_NAME):
         print(f"Warning: '{COMMAND_NAME}' not found in PATH.")
-        code_recall_bin = COMMAND_NAME
 
-    hook_command = f"{code_recall_bin} index --quiet"
-    desired_hook = _index_hook_config(hook_command)
+    status, hook_command = _sync_index_hook(
+        install_if_missing=True, fallback_to_name=True
+    )
 
-    settings = {}
-    if settings_path.exists():
-        try:
-            with open(settings_path) as f:
-                settings = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
+    if status == "skipped":
+        print(f"Could not update {settings_path}.")
+        print("  Check that it is readable and contains valid JSON.")
+        return
 
-    hooks = settings.get("hooks", {})
-    session_end_hooks = hooks.get("SessionEnd", [])
-
-    for rule in session_end_hooks:
-        for hook in rule.get("hooks", []):
-            if _hook_mentions_app(hook.get("command", "")):
-                hook.update(desired_hook)
-                settings_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(settings_path, "w") as f:
-                    json.dump(settings, f, indent=2)
-                print("Hook already installed; refreshed config.")
-                print(f"  Command: {desired_hook['command']}")
-                return
-
-    new_hook = {
-        "hooks": [desired_hook]
-    }
-    session_end_hooks.append(new_hook)
-    hooks["SessionEnd"] = session_end_hooks
-    settings["hooks"] = hooks
-
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2)
-
-    HOOKS_MARKER.parent.mkdir(parents=True, exist_ok=True)
-    HOOKS_MARKER.touch()
+    if status in ("unchanged", "repaired"):
+        print("Hook already installed; refreshed config.")
+        print(f"  Command: {hook_command}")
+        return
 
     print("Installed Claude Code SessionEnd hook!")
     print(f"  Settings: {settings_path}")
