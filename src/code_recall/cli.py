@@ -88,6 +88,9 @@ def _run(argv: list[str] | None = None) -> None:
 
     if command in ("index", "i"):
         _cmd_index(args)
+    elif command == "mcp":
+        _cmd_mcp(args)
+        return
     elif command == "info":
         _cmd_info(args)
     elif command == "gc":
@@ -569,6 +572,25 @@ def _cmd_index(args: argparse.Namespace) -> None:
             f"{stats['removed']} removed",
             file=sys.stderr,
         )
+
+
+def _cmd_mcp(args: argparse.Namespace) -> None:
+    """Run the MCP server, or 'code-recall mcp install' to register it
+    with the agent CLIs (Claude Code and Codex)."""
+    sub = args.query[1] if len(args.query) > 1 else None
+
+    if sub in ("install", "setup"):
+        from code_recall.mcp_server import install_to_agents
+
+        raise SystemExit(install_to_agents())
+
+    from code_recall.mcp_server import run
+
+    run(
+        db_path=args.db,
+        projects_dir=args.claude_dir,
+        codex_dir=None if args.no_codex else args.codex_dir,
+    )
 
 
 def _cmd_info(args: argparse.Namespace) -> None:
